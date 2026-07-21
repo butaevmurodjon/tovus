@@ -32,6 +32,10 @@ export async function removeCustomWord(chatId: number, rawWord: string): Promise
   return getCustomWords(chatId);
 }
 
+export async function clearCustomWords(chatId: number): Promise<void> {
+  await getRedis().del(key(chatId));
+}
+
 /** Adds a batch of words (e.g. an industry preset), respecting the same per-group cap. Returns how many were actually added. */
 export async function addCustomWords(chatId: number, rawWords: string[]): Promise<{ added: number; words: string[] }> {
   const redis = getRedis();

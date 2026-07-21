@@ -82,3 +82,7 @@ export async function addToWhitelist(chatId: number, userId: number): Promise<vo
 export async function removeFromWhitelist(chatId: number, userId: number): Promise<void> {
   await getRedis().srem(whitelistKey(chatId), userId);
 }
+
+export async function clearWhitelist(chatId: number): Promise<void> {
+  await getRedis().del(whitelistKey(chatId));
+}

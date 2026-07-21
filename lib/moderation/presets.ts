@@ -5,9 +5,9 @@
  * starting point an admin can prune/extend via /customwords, not an
  * authoritative or exhaustive list — same honesty rule as the profanity dict.
  */
-export type PresetKey = "agro" | "ecommerce" | "edtech";
+export type PresetKey = "agro" | "ecommerce" | "edtech" | "finance";
 
-export const PRESET_KEYS: PresetKey[] = ["agro", "ecommerce", "edtech"];
+export const PRESET_KEYS: PresetKey[] = ["agro", "ecommerce", "edtech", "finance"];
 
 export const PRESETS: Record<PresetKey, string[]> = {
   // Fake subsidy/grant schemes and fake input (seed/fertilizer) clearance sales
@@ -36,6 +36,18 @@ export const PRESETS: Record<PresetKey, string[]> = {
     "грант на обучение бесплатно только сегодня",
     "diplomni imtihonsiz sotib olaman",
     "bepul o'qish granti faqat bugun",
+  ],
+  // MLM/pyramid recruiting and crypto "double your deposit" scams — the dominant
+  // scam pattern in generic/finance-adjacent groups, cutting across all verticals.
+  finance: [
+    "пассивный доход без вложений",
+    "удвоим ваш депозит за неделю",
+    "инвестируй и получай процент каждый день",
+    "приглашай друзей и зарабатывай без вложений",
+    "крипто кошелёк удвоение баланса гарантия",
+    "сармоясиз пассив даромад",
+    "бир ҳафтада омонатингизни икки баравар қиламиз",
+    "дўстингизни таклиф қил ва пул топ",
   ],
 };
 

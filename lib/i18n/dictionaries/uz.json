@@ -51,7 +51,7 @@
     "statsHeader": "{period} учун статистика:",
     "statsLine": "Жами ўчирилди: {total}\nСўкиниш: {profanity}\nСпам: {spam}\nСунъий интеллект: {premium}",
     "langSet": "Гуруҳ хабарномалари тили: Ўзбекча",
-    "helpText": "Буйруқлар:\n/settings — жорий созламалар\n/premium on|off — сунъий интеллект модерацияси\n/filter_profanity on|off — сўкиниш фильтри\n/antispam on|off — антиспам\n/action delete|warn|mute|ban — қоидабузарлик учун чора\n/whitelist add|remove — оқ рўйхат (хабарга жавобан)\n/customwords add|remove|list — фильтр учун ўз сўзлари\n/preset agro|ecommerce|edtech — соҳа учун сўзлар тўплами\n/captcha on|off — янги аъзолар учун капча (PRO)\n/antiraid on|off — антирейд-ҳимоя (PRO)\n/welcome <матн>|off — хуш келибсиз хабари\n/logchannel — журнал каналини созлаш\n/stats — статистика\n/plan — тариф ҳолати\n/upgrade — PRO ни расмийлаштириш\n/lang ru|uz — гуруҳ хабарномалари тили\n/panel — Mini App'ни очиш",
+    "helpText": "Буйруқлар:\n/settings — жорий созламалар\n/premium on|off — сунъий интеллект модерацияси\n/filter_profanity on|off — сўкиниш фильтри\n/antispam on|off — антиспам\n/action delete|warn|mute|ban — қоидабузарлик учун чора\n/whitelist add|remove — оқ рўйхат (хабарга жавобан)\n/customwords add|remove|list — фильтр учун ўз сўзлари\n/preset agro|ecommerce|edtech|finance — соҳа учун сўзлар тўплами\n/captcha on|off — янги аъзолар учун капча (PRO)\n/antiraid on|off — антирейд-ҳимоя (PRO)\n/welcome <матн>|off — хуш келибсиз хабари\n/logchannel — журнал каналини созлаш\n/stats — статистика\n/plan — тариф ҳолати\n/upgrade — PRO ни расмийлаштириш\n/lang ru|uz — гуруҳ хабарномалари тили\n/panel — Mini App'ни очиш",
     "settingsHeader": "Гуруҳнинг жорий созламалари:",
     "settingsLine": "Сўкиниш фильтри: {profanity}\nАнтиспам: {antispam}\nПремиум (сунъий интеллект): {premium}\nЧора: {action}\nТил: {lang}\nЖурнал канали: {logChannel}",
     "actionNames": {
@@ -90,8 +90,8 @@
     "planFree": "Асосий",
     "planPro": "PRO, {date} гача",
     "presetApplied": "«{preset}» пресети қўлланди: {count} та сўз қўшилди.",
-    "presetUsage": "Фойдаланиш: /preset agro|ecommerce|edtech",
-    "presetUnknown": "Номаълум пресет. Мавжудлари: agro, ecommerce, edtech"
+    "presetUsage": "Фойдаланиш: /preset agro|ecommerce|edtech|finance",
+    "presetUnknown": "Номаълум пресет. Мавжудлари: agro, ecommerce, edtech, finance"
   },
   "miniapp": {
     "dashboardTitle": "Менинг гуруҳларим",
@@ -121,6 +121,7 @@
     "presetAgro": "Агро",
     "presetEcommerce": "E-commerce",
     "presetEdtech": "Таълим",
+    "presetFinance": "Молия/крипто",
     "presetApply": "Қўллаш",
     "logChannelTitle": "Журнал канали",
     "logChannelHint": "Ўчирилган хабарлар текшириш учун шу каналга нусхаланади",
@@ -178,6 +179,12 @@
     "categoryProfanity": "Сўкиниш",
     "categorySpam": "Спам",
     "categoryPremium": "Сунъий интеллект",
-    "close": "Ёпиш"
+    "close": "Ёпиш",
+    "tabJournal": "Журнал",
+    "tabWhitelist": "Оқ рўйхат",
+    "tabWordFilter": "Сўз фильтри",
+    "deleteAll": "Барчасини ўчириш",
+    "confirmDeleteAllWhitelist": "Оқ рўйхатдаги барча фойдаланувчиларни ўчирасизми? Бу амални бекор қилиб бўлмайди.",
+    "confirmDeleteAllWords": "Фильтрдаги барча сўзларни ўчирасизми? Бу амални бекор қилиб бўлмайди."
   }
 }

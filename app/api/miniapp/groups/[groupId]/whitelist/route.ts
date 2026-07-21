@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeGroupAdmin } from "@/lib/telegram/miniAppAuth";
-import { addToWhitelist, getWhitelist, removeFromWhitelist } from "@/lib/db/groups";
+import { addToWhitelist, clearWhitelist, getWhitelist, removeFromWhitelist } from "@/lib/db/groups";
 
 export const runtime = "nodejs";
 
@@ -45,6 +45,11 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ group
   if (!auth.ok) return NextResponse.json({ error: "forbidden" }, { status: auth.status });
 
   const url = new URL(req.url);
+  if (url.searchParams.get("all") === "1") {
+    await clearWhitelist(chatId);
+    return NextResponse.json({ whitelist: [] });
+  }
+
   const userId = Number(url.searchParams.get("userId"));
   if (!Number.isFinite(userId)) return NextResponse.json({ error: "invalid userId" }, { status: 400 });
 

@@ -19,6 +19,7 @@ interface TelegramWebApp {
   setBackgroundColor: (color: string) => void;
   disableVerticalSwipes?: () => void;
   openInvoice?: (url: string, callback?: (status: "paid" | "cancelled" | "failed" | "pending") => void) => void;
+  showConfirm?: (message: string, callback: (confirmed: boolean) => void) => void;
   HapticFeedback?: {
     impactOccurred: (style: "light" | "medium" | "heavy" | "rigid" | "soft") => void;
     notificationOccurred: (type: "error" | "success" | "warning") => void;
@@ -76,4 +77,28 @@ export function openInvoice(url: string, onStatus?: (status: "paid" | "cancelled
     return;
   }
   wa.openInvoice(url, onStatus);
+}
+
+/** Native confirm sheet for destructive actions (clear-all). Falls back to
+ * window.confirm outside Telegram, and on client versions where `showConfirm`
+ * exists as a function but throws WebAppMethodUnsupported synchronously instead
+ * of just being absent (observed on the WebView's own "unsupported version"
+ * shim) — that throw would otherwise reject this promise and silently swallow
+ * the whole clear-all action before window.confirm ever ran. */
+export function confirmAction(message: string): Promise<boolean> {
+  const wa = window.Telegram?.WebApp;
+  if (wa?.showConfirm) {
+    // The try/catch must wrap the actual call *inside* the executor: a `new
+    // Promise(executor)` that throws is caught by the engine and turned into a
+    // rejection, not a synchronous throw the caller could catch here.
+    const viaTelegram = new Promise<boolean>((resolve) => {
+      try {
+        wa.showConfirm!(message, resolve);
+      } catch {
+        resolve(window.confirm(message));
+      }
+    });
+    return viaTelegram.catch(() => window.confirm(message));
+  }
+  return Promise.resolve(window.confirm(message));
 }

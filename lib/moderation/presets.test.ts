@@ -20,6 +20,7 @@ describe("presets", () => {
     expect(isPresetKey("agro")).toBe(true);
     expect(isPresetKey("ecommerce")).toBe(true);
     expect(isPresetKey("edtech")).toBe(true);
+    expect(isPresetKey("finance")).toBe(true);
     expect(isPresetKey("random")).toBe(false);
   });
 });

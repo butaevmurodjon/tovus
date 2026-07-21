@@ -66,6 +66,7 @@ export default function DashboardPage() {
                   premium: t("miniapp.statusPremium"),
                   basic: t("miniapp.statusBasic"),
                   permissionIssue: t("miniapp.permissionIssueBadge"),
+                  pro: t("miniapp.planProBadge"),
                 }}
               />
             ))}

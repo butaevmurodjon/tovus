@@ -100,3 +100,6 @@ export const FLOOD_MAX_MESSAGES = 5;
 export const FLOOD_WINDOW_SECONDS = 10;
 export const DUPLICATE_MAX_COUNT = 3;
 export const DUPLICATE_WINDOW_SECONDS = 300;
+
+export const RAID_JOIN_THRESHOLD = 8;
+export const RAID_WINDOW_SECONDS = 30;

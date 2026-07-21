@@ -1,6 +1,7 @@
 import type { Message } from "grammy/types";
 import type { GroupSettings, ViolationCategory } from "@/lib/db/types";
 import { getCustomWords } from "@/lib/db/customWords";
+import { isProActive } from "@/lib/billing/plan";
 import { detectProfanity } from "./profanity";
 import { detectSpam, hasAnyLink } from "./spam";
 import { checkDuplicateFlood, checkUserFlood, consumeNewMemberFlag } from "./flood";
@@ -56,7 +57,8 @@ export async function moderateMessage(
   }
 
   if (settings.premium && text && text.trim().length >= 6) {
-    const verdict = await classifyWithGroq(text);
+    const pool = isProActive(settings) ? "pro" : "free";
+    const verdict = await classifyWithGroq(text, pool);
     if (verdict?.violation) {
       const forceWarnOnly = isFirstMessage && hasAnyLink(message);
       return {

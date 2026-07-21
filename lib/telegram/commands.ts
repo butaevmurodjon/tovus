@@ -7,11 +7,15 @@ import {
   removeFromWhitelist,
   updateGroupSettings,
 } from "@/lib/db/groups";
-import { addCustomWord, getCustomWords, removeCustomWord } from "@/lib/db/customWords";
+import { addCustomWord, addCustomWords, getCustomWords, removeCustomWord } from "@/lib/db/customWords";
 import { getStats } from "@/lib/db/stats";
+import { getCachedMemberCount } from "@/lib/db/memberCount";
+import { canUseProFeature, FREE_TIER_MAX_MEMBERS, isProActive } from "@/lib/billing/plan";
+import { PRESETS, isPresetKey } from "@/lib/moderation/presets";
 import { detectLang, isLang, t, type Lang } from "@/lib/i18n";
 import type { ViolationAction } from "@/lib/db/types";
 import { formatPermissionWarning, getBotPermissions, isChatAdmin } from "./adminCheck";
+import { sendUpgradeInvoice } from "./payments";
 
 function miniAppButtonUrl(startParam: string): string | null {
   const username = process.env.TELEGRAM_BOT_USERNAME;
@@ -38,6 +42,16 @@ async function langFor(ctx: Context): Promise<Lang> {
     if (settings) return settings.lang;
   }
   return detectLang(ctx.from?.language_code);
+}
+
+/** Shared gate for captcha/antiraid: active Pro subscription, or small enough for the free grace. */
+async function requireProFeature(ctx: Context, lang: Lang, chatId: number): Promise<boolean> {
+  const settings = await getGroupSettings(chatId);
+  if (!settings) return false;
+  const memberCount = await getCachedMemberCount(ctx.api, chatId);
+  if (canUseProFeature(settings, memberCount)) return true;
+  await ctx.reply(t(lang, "bot.proRequiredFeature", { limit: FREE_TIER_MAX_MEMBERS }));
+  return false;
 }
 
 export function registerCommands(bot: Bot): void {
@@ -91,10 +105,19 @@ export function registerCommands(bot: Bot): void {
       logChannel: settings.logChannelId ? String(settings.logChannelId) : t(lang, "miniapp.logChannelNotSet"),
     });
 
+    const planLabel = isProActive(settings)
+      ? t(lang, "bot.planPro", {
+          date: settings.planExpiresAt
+            ? new Date(settings.planExpiresAt).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU")
+            : "—",
+        })
+      : t(lang, "bot.planFree");
+    message += "\n" + t(lang, "bot.planStatusLine", { plan: planLabel });
+
     const perms = await getBotPermissions(ctx.api, ctx.chat!.id);
     const warning = formatPermissionWarning(
       lang,
-      { action: settings.action, captchaEnabled: settings.captchaEnabled },
+      { action: settings.action, captchaEnabled: settings.captchaEnabled, antiraidEnabled: settings.antiraidEnabled },
       perms
     );
     if (warning) message += "\n\n" + warning;
@@ -122,8 +145,52 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireAdmin(ctx, lang))) return;
     const arg = ctx.match?.toString().trim().toLowerCase();
     if (arg !== "on" && arg !== "off") return ctx.reply("/captcha on|off");
+    if (arg === "on" && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
     await updateGroupSettings(ctx.chat!.id, { captchaEnabled: arg === "on" });
     await ctx.reply(t(lang, arg === "on" ? "bot.captchaOn" : "bot.captchaOff"));
+  });
+
+  bot.command("antiraid", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim().toLowerCase();
+    if (arg !== "on" && arg !== "off") return ctx.reply(t(lang, "bot.antiraidUsage"));
+    if (arg === "on" && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
+    await updateGroupSettings(ctx.chat!.id, { antiraidEnabled: arg === "on" });
+    await ctx.reply(t(lang, arg === "on" ? "bot.antiraidOn" : "bot.antiraidOff"));
+  });
+
+  bot.command("upgrade", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    await sendUpgradeInvoice(ctx.api, ctx.chat!.id, lang);
+  });
+
+  bot.command("plan", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    const settings = await getGroupSettings(ctx.chat!.id);
+    if (!settings) return;
+    const planLabel = isProActive(settings)
+      ? t(lang, "bot.planPro", {
+          date: settings.planExpiresAt
+            ? new Date(settings.planExpiresAt).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU")
+            : "—",
+        })
+      : t(lang, "bot.planFree");
+    await ctx.reply(t(lang, "bot.planStatusLine", { plan: planLabel }));
+  });
+
+  bot.command("preset", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim().toLowerCase();
+    if (!arg || !isPresetKey(arg)) return ctx.reply(t(lang, "bot.presetUsage"));
+    const { added } = await addCustomWords(ctx.chat!.id, PRESETS[arg]);
+    await ctx.reply(t(lang, "bot.presetApplied", { preset: arg, count: added }));
   });
 
   bot.command("welcome", async (ctx) => {

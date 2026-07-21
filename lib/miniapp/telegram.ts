@@ -18,6 +18,7 @@ interface TelegramWebApp {
   setHeaderColor: (color: string) => void;
   setBackgroundColor: (color: string) => void;
   disableVerticalSwipes?: () => void;
+  openInvoice?: (url: string, callback?: (status: "paid" | "cancelled" | "failed" | "pending") => void) => void;
   HapticFeedback?: {
     impactOccurred: (style: "light" | "medium" | "heavy" | "rigid" | "soft") => void;
     notificationOccurred: (type: "error" | "success" | "warning") => void;
@@ -65,4 +66,14 @@ export function haptic(style: "light" | "medium" | "heavy" = "light") {
 
 export function hapticNotify(type: "error" | "success" | "warning") {
   window.Telegram?.WebApp?.HapticFeedback?.notificationOccurred(type);
+}
+
+/** Opens the Stars checkout sheet for an invoice link created via createInvoiceLink. */
+export function openInvoice(url: string, onStatus?: (status: "paid" | "cancelled" | "failed" | "pending") => void) {
+  const wa = window.Telegram?.WebApp;
+  if (!wa?.openInvoice) {
+    window.open(url, "_blank");
+    return;
+  }
+  wa.openInvoice(url, onStatus);
 }

@@ -4,6 +4,8 @@ export type ViolationAction = "delete" | "warn" | "mute" | "ban";
 
 export type ViolationCategory = "profanity" | "spam" | "premium";
 
+export type PlanTier = "free" | "pro";
+
 export interface GroupSettings {
   chatId: number;
   title: string;
@@ -16,9 +18,14 @@ export interface GroupSettings {
   createdAt: number;
   /** Off by default — tucked into an "Advanced" section in the Mini App, not the main flow. */
   captchaEnabled: boolean;
+  /** Mass-join detection; forces captcha verification on new members during a detected raid. Same eligibility gate as captcha. */
+  antiraidEnabled: boolean;
   welcomeEnabled: boolean;
   /** May contain the literal placeholder "{user}", substituted with an HTML mention on send. */
   welcomeMessage: string | null;
+  plan: PlanTier;
+  /** Unix ms. Null unless a Stars subscription has ever been active for this group. */
+  planExpiresAt: number | null;
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -28,8 +35,11 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   action: "delete",
   logChannelId: null,
   captchaEnabled: false,
+  antiraidEnabled: false,
   welcomeEnabled: false,
   welcomeMessage: null,
+  plan: "free",
+  planExpiresAt: null,
 };
 
 export interface JournalEntry {
@@ -61,4 +71,6 @@ export interface AdminGroupSummary {
   profanityFilter: boolean;
   antispam: boolean;
   hasPermissionIssue: boolean;
+  plan: PlanTier;
+  isPro: boolean;
 }

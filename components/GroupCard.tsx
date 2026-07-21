@@ -8,7 +8,7 @@ export function GroupCard({
   labels,
 }: {
   group: AdminGroupSummary;
-  labels: { premium: string; basic: string; permissionIssue: string };
+  labels: { premium: string; basic: string; permissionIssue: string; pro: string };
 }) {
   return (
     <Link href={`/group/${group.chatId}`} className="block">
@@ -21,6 +21,7 @@ export function GroupCard({
             <Badge variant={group.premium ? "accent" : "neutral"}>
               {group.premium ? labels.premium : labels.basic}
             </Badge>
+            {group.isPro && <Badge variant="accent">{labels.pro}</Badge>}
             {group.hasPermissionIssue && <Badge variant="critical">{labels.permissionIssue}</Badge>}
           </div>
         </div>

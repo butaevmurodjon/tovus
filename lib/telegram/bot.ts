@@ -1,14 +1,17 @@
 import { Bot, webhookCallback } from "grammy";
 import { getGroupSettings, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
 import { incrementActivity } from "@/lib/db/stats";
+import { getCachedMemberCount } from "@/lib/db/memberCount";
+import { canUseProFeature } from "@/lib/billing/plan";
 import { moderateMessage } from "@/lib/moderation";
-import { markNewMember } from "@/lib/moderation/flood";
+import { checkRaid, markNewMember } from "@/lib/moderation/flood";
 import { detectLang, t } from "@/lib/i18n";
 import { formatPermissionWarning, isChatAdmin } from "./adminCheck";
 import { registerCommands } from "./commands";
 import { applyViolation } from "./violations";
 import { startCaptcha, sweepExpiredCaptchas, verifyCaptcha } from "./captcha";
 import { sendWelcomeMessage } from "./welcome";
+import { activateProPlan, parseProPayload } from "./payments";
 
 let _bot: Bot | null = null;
 
@@ -42,7 +45,11 @@ export function getBot(): Bot {
       const lang = settings?.lang ?? detectLang(update.from.language_code);
       const warning = formatPermissionWarning(
         lang,
-        { action: settings?.action ?? "delete", captchaEnabled: settings?.captchaEnabled },
+        {
+          action: settings?.action ?? "delete",
+          captchaEnabled: settings?.captchaEnabled,
+          antiraidEnabled: settings?.antiraidEnabled,
+        },
         {
           isAdmin: true,
           canDeleteMessages: newMember.can_delete_messages,
@@ -89,10 +96,29 @@ export function getBot(): Bot {
     await ctx.answerCallbackQuery();
   });
 
+  // Stars checkout: must answer within 10s. No stock/shipping to validate — always OK.
+  bot.on("pre_checkout_query", async (ctx) => {
+    await ctx.answerPreCheckoutQuery(true);
+  });
+
   bot.on(["message", "edited_message"], async (ctx) => {
     const message = ctx.message ?? ctx.editedMessage;
     const chat = ctx.chat;
     if (!message || !chat || (chat.type !== "group" && chat.type !== "supergroup")) return;
+
+    if (message.successful_payment) {
+      const payment = message.successful_payment;
+      const targetChatId = parseProPayload(payment.invoice_payload) ?? chat.id;
+      const expiresAtMs = payment.subscription_expiration_date
+        ? payment.subscription_expiration_date * 1000
+        : Date.now() + 30 * 24 * 60 * 60 * 1000;
+      await activateProPlan(targetChatId, expiresAtMs);
+      const settings = await getGroupSettings(targetChatId);
+      const lang = settings?.lang ?? "ru";
+      const dateLabel = new Date(expiresAtMs).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU");
+      await ctx.api.sendMessage(chat.id, t(lang, "bot.paymentThanks", { date: dateLabel })).catch(() => {});
+      return;
+    }
 
     const settings = await getGroupSettings(chat.id);
 
@@ -100,10 +126,13 @@ export function getBot(): Bot {
       const newMembers = message.new_chat_members.filter((member) => !member.is_bot);
       await Promise.all(newMembers.map((member) => markNewMember(chat.id, member.id)));
       if (settings) {
+        const memberCount = await getCachedMemberCount(ctx.api, chat.id);
+        const eligible = canUseProFeature(settings, memberCount);
         await Promise.all(
           newMembers.map(async (member) => {
             await incrementActivity(chat.id, "joins").catch(() => {});
-            if (settings.captchaEnabled) {
+            const isRaid = settings.antiraidEnabled && eligible ? await checkRaid(chat.id) : false;
+            if ((settings.captchaEnabled && eligible) || isRaid) {
               await startCaptcha(ctx.api, chat.id, member, settings.lang).catch(() => {});
             } else if (settings.welcomeEnabled && settings.welcomeMessage) {
               await sendWelcomeMessage(ctx.api, chat.id, member, settings.welcomeMessage).catch(() => {});

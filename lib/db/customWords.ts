@@ -31,3 +31,18 @@ export async function removeCustomWord(chatId: number, rawWord: string): Promise
   if (word) await getRedis().srem(key(chatId), word);
   return getCustomWords(chatId);
 }
+
+/** Adds a batch of words (e.g. an industry preset), respecting the same per-group cap. Returns how many were actually added. */
+export async function addCustomWords(chatId: number, rawWords: string[]): Promise<{ added: number; words: string[] }> {
+  const redis = getRedis();
+  const before = await redis.scard(key(chatId));
+  const room = Math.max(0, MAX_CUSTOM_WORDS - before);
+  const cleaned = Array.from(new Set(rawWords.map(normalizeCustomWord).filter((w): w is string => w !== null)));
+  const toAdd = cleaned.slice(0, room);
+  if (toAdd.length > 0) {
+    const [first, ...rest] = toAdd;
+    await redis.sadd(key(chatId), first, ...rest);
+  }
+  const words = await getCustomWords(chatId);
+  return { added: toAdd.length, words };
+}

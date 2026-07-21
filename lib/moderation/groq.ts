@@ -3,14 +3,18 @@ import { getRedis } from "@/lib/db/redis";
 
 const MODEL = "llama-3.3-70b-versatile";
 
+export type QuotaPool = "free" | "pro";
+
 // Conservative guards under the Groq free-tier limits for this model
-// (30 RPM / 1K RPD / 12K TPM / 100K TPD as of 2026). Shared across every
-// premium group on this deployment's single API key, so these are budgets
-// for the whole fleet, not per group.
-const MAX_REQUESTS_PER_MINUTE = 25;
-const MAX_REQUESTS_PER_DAY = 900;
-const MAX_TOKENS_PER_MINUTE = 10_000;
-const MAX_TOKENS_PER_DAY = 90_000;
+// (30 RPM / 1K RPD / 12K TPM / 100K TPD as of 2026), split into two pools so a
+// burst of free-tier groups can never starve a paying Pro group's quota — the
+// "dedicated AI quota" perk. Numbers are a starting split, adjustable; they
+// intentionally leave headroom under the account-wide ceiling.
+const BUDGETS: Record<QuotaPool, { rpm: number; rpd: number; tpm: number; tpd: number }> = {
+  pro: { rpm: 8, rpd: 300, tpm: 3500, tpd: 30_000 },
+  free: { rpm: 17, rpd: 600, tpm: 6500, tpd: 60_000 },
+};
+
 const MAX_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 400;
 const REQUEST_TIMEOUT_MS = 6000;
@@ -46,13 +50,14 @@ async function withinTokenBudget(key: string, ttlSeconds: number, max: number, t
 }
 
 /** All budgets must clear before we spend a Groq call; any one exhausted -> silent fallback. */
-async function withinRateBudget(text: string): Promise<boolean> {
+async function withinRateBudget(pool: QuotaPool, text: string): Promise<boolean> {
   const tokens = estimateTokens(text);
+  const b = BUDGETS[pool];
   const [rpm, rpd, tpm, tpd] = await Promise.all([
-    withinCounterBudget("groq:rpm", 60, MAX_REQUESTS_PER_MINUTE),
-    withinCounterBudget("groq:rpd", 60 * 60 * 24, MAX_REQUESTS_PER_DAY),
-    withinTokenBudget("groq:tpm", 60, MAX_TOKENS_PER_MINUTE, tokens),
-    withinTokenBudget("groq:tpd", 60 * 60 * 24, MAX_TOKENS_PER_DAY, tokens),
+    withinCounterBudget(`groq:${pool}:rpm`, 60, b.rpm),
+    withinCounterBudget(`groq:${pool}:rpd`, 60 * 60 * 24, b.rpd),
+    withinTokenBudget(`groq:${pool}:tpm`, 60, b.tpm, tokens),
+    withinTokenBudget(`groq:${pool}:tpd`, 60 * 60 * 24, b.tpd, tokens),
   ]);
   return rpm && rpd && tpm && tpd;
 }
@@ -77,10 +82,13 @@ Be conservative: normal conversation, jokes, and on-topic messages are NOT viola
  * Classify a borderline message via Groq. Returns null on any failure,
  * timeout, or rate-limit exhaustion so callers can silently fall back to
  * base rules — chat users must never see an error from this path.
+ *
+ * `pool` routes to the group's plan-appropriate budget — Pro groups draw from
+ * a reserved slice that free-tier traffic can never exhaust, see BUDGETS above.
  */
-export async function classifyWithGroq(text: string): Promise<GroqClassification | null> {
+export async function classifyWithGroq(text: string, pool: QuotaPool = "free"): Promise<GroqClassification | null> {
   if (!process.env.GROQ_API_KEY) return null;
-  if (!(await withinRateBudget(text))) return null;
+  if (!(await withinRateBudget(pool, text))) return null;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {

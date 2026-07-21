@@ -46,17 +46,18 @@ export async function getBotPermissions(api: Api, chatId: number): Promise<BotPe
 
 export interface PermissionContext {
   action: ViolationAction;
-  /** Captcha also mutes-then-unmutes new members, so it needs restrict rights too. */
+  /** Captcha/antiraid both mute-then-unmute members, so they need restrict rights too. */
   captchaEnabled?: boolean;
+  antiraidEnabled?: boolean;
 }
 
-/** Which capabilities the configured action (and captcha, if on) need that the bot doesn't currently have. */
+/** Which capabilities the configured action (and captcha/antiraid, if on) need that the bot doesn't currently have. */
 export function missingPermissionsFor(ctx: PermissionContext, perms: BotPermissions): string[] {
   if (!perms.isAdmin) return ["admin"];
   const missing: string[] = [];
   // Every action deletes the offending message first.
   if (!perms.canDeleteMessages) missing.push("delete");
-  const needsRestrict = ctx.action === "mute" || ctx.action === "ban" || ctx.captchaEnabled;
+  const needsRestrict = ctx.action === "mute" || ctx.action === "ban" || ctx.captchaEnabled || ctx.antiraidEnabled;
   if (needsRestrict && !perms.canRestrictMembers) missing.push("restrict");
   return missing;
 }

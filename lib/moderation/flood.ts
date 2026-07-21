@@ -4,6 +4,8 @@ import {
   DUPLICATE_WINDOW_SECONDS,
   FLOOD_MAX_MESSAGES,
   FLOOD_WINDOW_SECONDS,
+  RAID_JOIN_THRESHOLD,
+  RAID_WINDOW_SECONDS,
 } from "./spamDict";
 
 function hashText(text: string): string {
@@ -31,6 +33,20 @@ export async function checkDuplicateFlood(chatId: number, text: string): Promise
   const count = await redis.incr(key);
   if (count === 1) await redis.expire(key, DUPLICATE_WINDOW_SECONDS);
   return count > DUPLICATE_MAX_COUNT;
+}
+
+/**
+ * Pure join-rate detection, independent of group size — N joins within a short
+ * window regardless of whether the group has 50 or 5000 members. Returns true
+ * for every join for the rest of the window once the threshold is crossed, so
+ * every member of the burst (not just the one that tipped it over) gets flagged.
+ */
+export async function checkRaid(chatId: number): Promise<boolean> {
+  const redis = getRedis();
+  const key = `raid:${chatId}`;
+  const count = await redis.incr(key);
+  if (count === 1) await redis.expire(key, RAID_WINDOW_SECONDS);
+  return count >= RAID_JOIN_THRESHOLD;
 }
 
 // Safety net in case a member's first message never arrives (left without posting, etc.) —

@@ -3,6 +3,7 @@ import { authenticateRequest } from "@/lib/telegram/miniAppAuth";
 import { getApi } from "@/lib/telegram/api";
 import { getBotPermissions, isChatAdmin, missingPermissionsFor } from "@/lib/telegram/adminCheck";
 import { getGroupSettings, listAllGroupIds } from "@/lib/db/groups";
+import { isProActive } from "@/lib/billing/plan";
 import type { AdminGroupSummary } from "@/lib/db/types";
 
 export const runtime = "nodejs";
@@ -21,15 +22,20 @@ export async function GET(req: Request) {
       const settings = await getGroupSettings(chatId);
       if (!settings) return null;
       const botPermissions = await getBotPermissions(api, chatId);
+      const permCtx = {
+        action: settings.action,
+        captchaEnabled: settings.captchaEnabled,
+        antiraidEnabled: settings.antiraidEnabled,
+      };
       return {
         chatId,
         title: settings.title,
         premium: settings.premium,
         profanityFilter: settings.profanityFilter,
         antispam: settings.antispam,
-        hasPermissionIssue:
-          missingPermissionsFor({ action: settings.action, captchaEnabled: settings.captchaEnabled }, botPermissions)
-            .length > 0,
+        hasPermissionIssue: missingPermissionsFor(permCtx, botPermissions).length > 0,
+        plan: settings.plan,
+        isPro: isProActive(settings),
       };
     })
   );

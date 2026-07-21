@@ -7,12 +7,17 @@ import type { GroupSettings } from "@/lib/db/types";
 
 type Status = "loading" | "ready" | "forbidden" | "error";
 
-interface GroupContextValue {
+interface GroupStatusFields {
+  missingPermissions: string[];
+  memberCount: number | null;
+  proFeaturesEligible: boolean;
+}
+
+interface GroupContextValue extends GroupStatusFields {
   status: Status;
   chatId: number;
   settings: GroupSettings | null;
   whitelist: number[];
-  missingPermissions: string[];
   refresh: () => void;
   updateSettings: (patch: Partial<GroupSettings>) => Promise<void>;
   setWhitelist: (ids: number[]) => void;
@@ -20,26 +25,30 @@ interface GroupContextValue {
 
 const GroupContext = createContext<GroupContextValue | null>(null);
 
+const EMPTY_STATUS: GroupStatusFields = { missingPermissions: [], memberCount: null, proFeaturesEligible: true };
+
 export function GroupProvider({ chatId, children }: { chatId: number; children: React.ReactNode }) {
   const { status: appStatus, fetcher } = useApp();
   const [status, setStatus] = useState<Status>("loading");
   const [settings, setSettings] = useState<GroupSettings | null>(null);
   const [whitelist, setWhitelist] = useState<number[]>([]);
-  const [missingPermissions, setMissingPermissions] = useState<string[]>([]);
+  const [statusFields, setStatusFields] = useState<GroupStatusFields>(EMPTY_STATUS);
   const [tick, setTick] = useState(0);
 
   const load = useCallback(() => {
     if (appStatus !== "ready" || Number.isNaN(chatId)) return;
     let cancelled = false;
     setStatus("loading");
-    fetcher<{ settings: GroupSettings; whitelist: number[]; missingPermissions: string[] }>(
-      `/api/miniapp/groups/${chatId}`
-    )
+    fetcher<{ settings: GroupSettings; whitelist: number[] } & GroupStatusFields>(`/api/miniapp/groups/${chatId}`)
       .then((data) => {
         if (cancelled) return;
         setSettings(data.settings);
         setWhitelist(data.whitelist);
-        setMissingPermissions(data.missingPermissions ?? []);
+        setStatusFields({
+          missingPermissions: data.missingPermissions ?? [],
+          memberCount: data.memberCount ?? null,
+          proFeaturesEligible: data.proFeaturesEligible ?? true,
+        });
         setStatus("ready");
       })
       .catch((err) => {
@@ -61,12 +70,16 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
 
   const updateSettings = useCallback(
     async (patch: Partial<GroupSettings>) => {
-      const data = await fetcher<{ settings: GroupSettings; missingPermissions: string[] }>(
-        `/api/miniapp/groups/${chatId}`,
-        { method: "PATCH", body: JSON.stringify(patch) }
-      );
+      const data = await fetcher<{ settings: GroupSettings } & GroupStatusFields>(`/api/miniapp/groups/${chatId}`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
       setSettings(data.settings);
-      setMissingPermissions(data.missingPermissions ?? []);
+      setStatusFields({
+        missingPermissions: data.missingPermissions ?? [],
+        memberCount: data.memberCount ?? null,
+        proFeaturesEligible: data.proFeaturesEligible ?? true,
+      });
     },
     [chatId, fetcher]
   );
@@ -76,7 +89,7 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
     chatId,
     settings,
     whitelist,
-    missingPermissions,
+    ...statusFields,
     refresh,
     updateSettings,
     setWhitelist,

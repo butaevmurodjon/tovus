@@ -27,7 +27,14 @@ const res = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
   body: JSON.stringify({
     url,
     secret_token: secret || undefined,
-    allowed_updates: ["message", "edited_message", "my_chat_member", "chat_member"],
+    allowed_updates: [
+      "message",
+      "edited_message",
+      "my_chat_member",
+      "chat_member",
+      "callback_query",
+      "pre_checkout_query",
+    ],
     drop_pending_updates: false,
   }),
 });

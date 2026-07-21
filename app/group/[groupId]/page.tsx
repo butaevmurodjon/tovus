@@ -10,12 +10,22 @@ import { Button } from "@/components/Button";
 import { Badge } from "@/components/Badge";
 import { PermissionWarning } from "@/components/PermissionWarning";
 import { Collapsible } from "@/components/Collapsible";
-import { haptic } from "@/lib/miniapp/telegram";
+import { haptic, hapticNotify, openInvoice } from "@/lib/miniapp/telegram";
+import { ApiError } from "@/lib/miniapp/api";
+import { isProActive, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
+import { PRESET_KEYS, type PresetKey } from "@/lib/moderation/presets";
 import type { ViolationAction } from "@/lib/db/types";
 
+const PRESET_LABEL_KEY: Record<PresetKey, string> = {
+  agro: "miniapp.presetAgro",
+  ecommerce: "miniapp.presetEcommerce",
+  edtech: "miniapp.presetEdtech",
+};
+
 export default function GroupSettingsPage() {
-  const { t, fetcher } = useApp();
-  const { settings, whitelist, missingPermissions, updateSettings, chatId, refresh } = useGroup();
+  const { t, fetcher, lang } = useApp();
+  const { settings, whitelist, missingPermissions, proFeaturesEligible, updateSettings, chatId, refresh } =
+    useGroup();
   const [toast, setToast] = useState<string | null>(null);
   const [logChannelInput, setLogChannelInput] = useState(settings?.logChannelId?.toString() ?? "");
   const [whitelistInput, setWhitelistInput] = useState("");
@@ -90,12 +100,50 @@ export default function GroupSettingsPage() {
     }
   }
 
-  async function toggleCaptcha(value: boolean) {
+  async function toggleProFeature(key: "captchaEnabled" | "antiraidEnabled", value: boolean) {
     haptic("light");
     setBusy(true);
     try {
-      await updateSettings({ captchaEnabled: value });
+      await updateSettings({ [key]: value } as never);
       flash(t("miniapp.savedToast"));
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 402) {
+        hapticNotify("error");
+        flash(t("miniapp.proLockedHint", { limit: FREE_TIER_MAX_MEMBERS }));
+      } else {
+        hapticNotify("error");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUpgrade() {
+    haptic("light");
+    setBusy(true);
+    try {
+      const { link } = await fetcher<{ link: string }>(`/api/miniapp/groups/${chatId}/upgrade`, { method: "POST" });
+      openInvoice(link, (status) => {
+        if (status === "paid") {
+          hapticNotify("success");
+          setTimeout(refresh, 1500);
+        }
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function applyPreset(preset: PresetKey) {
+    haptic("light");
+    setBusy(true);
+    try {
+      const data = await fetcher<{ added: number; words: string[] }>(`/api/miniapp/groups/${chatId}/presets`, {
+        method: "POST",
+        body: JSON.stringify({ preset }),
+      });
+      setCustomWords(data.words);
+      flash(t("miniapp.presetApplied", { preset, count: data.added }));
     } finally {
       setBusy(false);
     }
@@ -170,6 +218,32 @@ export default function GroupSettingsPage() {
       )}
 
       <PermissionWarning missing={missingPermissions} action={settings.action} t={t} />
+
+      <Card>
+        <CardSection title={t("miniapp.planTitle")}>
+          <div className="flex items-center justify-between">
+            <Badge variant={isProActive(settings) ? "accent" : "neutral"}>
+              {isProActive(settings)
+                ? `${t("miniapp.planProBadge")} · ${t("miniapp.planExpiresOn", {
+                    date: settings.planExpiresAt
+                      ? new Date(settings.planExpiresAt).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU")
+                      : "—",
+                  })}`
+                : t("miniapp.planFreeBadge")}
+            </Badge>
+            {!isProActive(settings) && (
+              <Button variant="primary" onClick={handleUpgrade} disabled={busy}>
+                {t("miniapp.upgradeButton")}
+              </Button>
+            )}
+          </div>
+          {!isProActive(settings) && (
+            <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.upgradeHint")}
+            </p>
+          )}
+        </CardSection>
+      </Card>
 
       <Card>
         <CardSection>
@@ -285,6 +359,18 @@ export default function GroupSettingsPage() {
       </Card>
 
       <Card>
+        <CardSection title={t("miniapp.presetsTitle")} subtitle={t("miniapp.presetsHint")}>
+          <div className="flex flex-wrap gap-2">
+            {PRESET_KEYS.map((key) => (
+              <Button key={key} variant="secondary" onClick={() => applyPreset(key)} disabled={busy}>
+                {t(PRESET_LABEL_KEY[key])}
+              </Button>
+            ))}
+          </div>
+        </CardSection>
+      </Card>
+
+      <Card>
         <CardSection title={t("miniapp.logChannelTitle")} subtitle={t("miniapp.logChannelHint")}>
           <div className="flex gap-2">
             <input
@@ -321,11 +407,40 @@ export default function GroupSettingsPage() {
       <Card>
         <CardSection>
           <Collapsible title={t("miniapp.advancedSection")}>
-            <Row label={t("miniapp.captchaTitle")}>
-              <Toggle checked={settings.captchaEnabled} onChange={toggleCaptcha} disabled={busy} />
+            <Row
+              label={
+                <span className="flex items-center gap-1.5">
+                  {t("miniapp.captchaTitle")}
+                  {!proFeaturesEligible && <Badge variant="warning">PRO</Badge>}
+                </span>
+              }
+            >
+              <Toggle
+                checked={settings.captchaEnabled}
+                onChange={(v) => toggleProFeature("captchaEnabled", v)}
+                disabled={busy}
+              />
+            </Row>
+            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
+              {proFeaturesEligible ? t("miniapp.captchaHint") : t("miniapp.proLockedHint", { limit: FREE_TIER_MAX_MEMBERS })}
+            </p>
+            <Divider />
+            <Row
+              label={
+                <span className="flex items-center gap-1.5">
+                  {t("miniapp.antiraidTitle")}
+                  {!proFeaturesEligible && <Badge variant="warning">PRO</Badge>}
+                </span>
+              }
+            >
+              <Toggle
+                checked={settings.antiraidEnabled}
+                onChange={(v) => toggleProFeature("antiraidEnabled", v)}
+                disabled={busy}
+              />
             </Row>
             <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.captchaHint")}
+              {proFeaturesEligible ? t("miniapp.antiraidHint") : t("miniapp.proLockedHint", { limit: FREE_TIER_MAX_MEMBERS })}
             </p>
           </Collapsible>
         </CardSection>
@@ -334,7 +449,7 @@ export default function GroupSettingsPage() {
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between py-1.5">
       <span className="text-[14px]" style={{ color: "var(--ink)" }}>

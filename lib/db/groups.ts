@@ -20,8 +20,17 @@ export async function registerGroup(chatId: number, title: string, lang?: Lang):
       createdAt: Date.now(),
     };
     await redis.set(settingsKey(chatId), settings);
-  } else if (current.title !== title) {
-    await saveGroupSettings({ ...current, title });
+  } else {
+    // A group registered before a schema change is missing whatever fields were
+    // added since — merge those defaults in so older groups don't silently fall
+    // back to `undefined` for new features instead of the intended default.
+    const backfill: Partial<GroupSettings> = {};
+    for (const k of Object.keys(DEFAULT_GROUP_SETTINGS) as (keyof typeof DEFAULT_GROUP_SETTINGS)[]) {
+      if (!(k in current)) (backfill as Record<string, unknown>)[k] = DEFAULT_GROUP_SETTINGS[k];
+    }
+    if (current.title !== title || Object.keys(backfill).length > 0) {
+      await saveGroupSettings({ ...current, ...backfill, title });
+    }
   }
 }
 

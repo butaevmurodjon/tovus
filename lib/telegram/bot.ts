@@ -2,7 +2,7 @@ import { Bot, webhookCallback } from "grammy";
 import { getGroupSettings, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
 import { incrementActivity } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
-import { canUseProFeature } from "@/lib/billing/plan";
+import { canUseProFeature, formatPlanDate } from "@/lib/billing/plan";
 import { moderateMessage } from "@/lib/moderation";
 import { checkRaid, markNewMember } from "@/lib/moderation/flood";
 import { detectLang, t } from "@/lib/i18n";
@@ -112,11 +112,16 @@ export function getBot(): Bot {
     const expiresAtMs = payment.subscription_expiration_date
       ? payment.subscription_expiration_date * 1000
       : Date.now() + 30 * 24 * 60 * 60 * 1000;
-    await activateProPlan(targetChatId, expiresAtMs);
+    const activated = await activateProPlan(targetChatId, expiresAtMs);
     const settings = await getGroupSettings(targetChatId);
     const lang = settings?.lang ?? "ru";
-    const dateLabel = new Date(expiresAtMs).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU");
-    await ctx.reply(t(lang, "bot.paymentThanks", { date: dateLabel })).catch(() => {});
+    // Telegram already took the payer's Stars regardless of what we say next — if
+    // activation failed (e.g. the group was removed between checkout and here),
+    // we must not tell them Pro is active when it silently isn't.
+    const reply = activated
+      ? t(lang, "bot.paymentThanks", { date: formatPlanDate(expiresAtMs, lang) })
+      : t(lang, "bot.paymentReceivedActivationFailed");
+    await ctx.reply(reply).catch(() => {});
   });
 
   bot.on(["message", "edited_message"], async (ctx) => {

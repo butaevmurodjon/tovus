@@ -39,10 +39,13 @@ export async function addCustomWords(chatId: number, rawWords: string[]): Promis
   const room = Math.max(0, MAX_CUSTOM_WORDS - before);
   const cleaned = Array.from(new Set(rawWords.map(normalizeCustomWord).filter((w): w is string => w !== null)));
   const toAdd = cleaned.slice(0, room);
+  // Genuinely-new count, not attempted count: some of `toAdd` may already be in
+  // the set (a preset re-applied, or overlap with words a user added manually).
+  let added = 0;
   if (toAdd.length > 0) {
     const [first, ...rest] = toAdd;
-    await redis.sadd(key(chatId), first, ...rest);
+    added = await redis.sadd(key(chatId), first, ...rest);
   }
   const words = await getCustomWords(chatId);
-  return { added: toAdd.length, words };
+  return { added, words };
 }

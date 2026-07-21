@@ -19,9 +19,8 @@ export async function GET(req: Request) {
     chatIds.map(async (chatId): Promise<AdminGroupSummary | null> => {
       const admin = await isChatAdmin(api, chatId, user.id).catch(() => false);
       if (!admin) return null;
-      const settings = await getGroupSettings(chatId);
+      const [settings, botPermissions] = await Promise.all([getGroupSettings(chatId), getBotPermissions(api, chatId)]);
       if (!settings) return null;
-      const botPermissions = await getBotPermissions(api, chatId);
       const permCtx = {
         action: settings.action,
         captchaEnabled: settings.captchaEnabled,

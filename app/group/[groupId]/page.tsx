@@ -12,9 +12,9 @@ import { PermissionWarning } from "@/components/PermissionWarning";
 import { Collapsible } from "@/components/Collapsible";
 import { haptic, hapticNotify, openInvoice } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
-import { isProActive, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
+import { isProActive, formatPlanDate, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
 import { PRESET_KEYS, type PresetKey } from "@/lib/moderation/presets";
-import type { ViolationAction } from "@/lib/db/types";
+import type { GroupSettings, ViolationAction } from "@/lib/db/types";
 
 const PRESET_LABEL_KEY: Record<PresetKey, string> = {
   agro: "miniapp.presetAgro",
@@ -126,12 +126,39 @@ export default function GroupSettingsPage() {
       openInvoice(link, (status) => {
         if (status === "paid") {
           hapticNotify("success");
-          setTimeout(refresh, 1500);
+          // The webhook that actually flips `plan`/`planExpiresAt` in storage races
+          // this callback — a single fixed-delay refresh can land before it commits
+          // and show the group as still on the free plan. Poll with backoff instead
+          // of guessing one delay that works for every payment.
+          pollForProActivation();
         }
       });
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
     } finally {
       setBusy(false);
     }
+  }
+
+  function pollForProActivation(attempt = 0) {
+    const delays = [1200, 1800, 2500, 3500];
+    if (attempt >= delays.length) return;
+    setTimeout(async () => {
+      // Check freshly-fetched settings directly rather than the `settings` closed
+      // over at call time — `refresh()` only schedules a state update, so reading
+      // context state right after calling it would still see the stale value.
+      try {
+        const data = await fetcher<{ settings: GroupSettings }>(`/api/miniapp/groups/${chatId}`);
+        if (isProActive(data.settings)) {
+          refresh();
+        } else {
+          pollForProActivation(attempt + 1);
+        }
+      } catch {
+        pollForProActivation(attempt + 1);
+      }
+    }, delays[attempt]);
   }
 
   async function applyPreset(preset: PresetKey) {
@@ -144,6 +171,9 @@ export default function GroupSettingsPage() {
       });
       setCustomWords(data.words);
       flash(t("miniapp.presetApplied", { preset, count: data.added }));
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
     } finally {
       setBusy(false);
     }
@@ -225,9 +255,7 @@ export default function GroupSettingsPage() {
             <Badge variant={isProActive(settings) ? "accent" : "neutral"}>
               {isProActive(settings)
                 ? `${t("miniapp.planProBadge")} · ${t("miniapp.planExpiresOn", {
-                    date: settings.planExpiresAt
-                      ? new Date(settings.planExpiresAt).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU")
-                      : "—",
+                    date: formatPlanDate(settings.planExpiresAt, lang),
                   })}`
                 : t("miniapp.planFreeBadge")}
             </Badge>

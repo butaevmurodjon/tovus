@@ -12,7 +12,9 @@ function buildPayload(chatId: number): string {
 /** Returns the chatId the payment was for, or null if this payload isn't one of ours. */
 export function parseProPayload(payload: string): number | null {
   if (!payload.startsWith(PAYLOAD_PREFIX)) return null;
-  const chatId = Number(payload.slice(PAYLOAD_PREFIX.length));
+  const idPart = payload.slice(PAYLOAD_PREFIX.length);
+  if (idPart === "") return null;
+  const chatId = Number(idPart);
   return Number.isFinite(chatId) ? chatId : null;
 }
 
@@ -42,7 +44,12 @@ export async function sendUpgradeInvoice(api: Api, chatId: number, lang: Lang): 
   });
 }
 
-/** Called on a successful_payment update — activates (or extends) the Pro plan for the group. */
-export async function activateProPlan(chatId: number, expiresAtMs: number): Promise<void> {
-  await updateGroupSettings(chatId, { plan: "pro", planExpiresAt: expiresAtMs });
+/**
+ * Called on a successful_payment update — activates (or extends) the Pro plan
+ * for the group. Returns whether the group actually exists/was updated, so the
+ * caller can avoid telling a payer Pro is active when it silently wasn't.
+ */
+export async function activateProPlan(chatId: number, expiresAtMs: number): Promise<boolean> {
+  const result = await updateGroupSettings(chatId, { plan: "pro", planExpiresAt: expiresAtMs });
+  return result !== null;
 }

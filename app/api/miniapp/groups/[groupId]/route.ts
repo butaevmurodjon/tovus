@@ -91,28 +91,32 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
     ? canUseProFeature(current, await getCachedMemberCount(getApi(), chatId))
     : true;
 
+  // A gated toggle that fails eligibility is rejected individually, not the whole
+  // request — otherwise a mixed patch (e.g. a new welcome message alongside an
+  // ineligible captcha toggle) would silently drop the welcome-message change too.
+  const rejected: string[] = [];
   if (typeof body.captchaEnabled === "boolean") {
-    if (!body.captchaEnabled) {
-      patch.captchaEnabled = false;
-    } else if (!eligible) {
-      return NextResponse.json({ error: "pro required" }, { status: 402 });
+    if (!body.captchaEnabled || eligible) {
+      patch.captchaEnabled = body.captchaEnabled;
     } else {
-      patch.captchaEnabled = true;
+      rejected.push("captchaEnabled");
     }
   }
   if (typeof body.antiraidEnabled === "boolean") {
-    if (!body.antiraidEnabled) {
-      patch.antiraidEnabled = false;
-    } else if (!eligible) {
-      return NextResponse.json({ error: "pro required" }, { status: 402 });
+    if (!body.antiraidEnabled || eligible) {
+      patch.antiraidEnabled = body.antiraidEnabled;
     } else {
-      patch.antiraidEnabled = true;
+      rejected.push("antiraidEnabled");
     }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: "pro required", rejected }, { status: 402 });
   }
 
   const updated = await updateGroupSettings(chatId, patch);
   if (!updated) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const status = await buildStatusFields(chatId, updated);
-  return NextResponse.json({ settings: updated, ...status });
+  return NextResponse.json({ settings: updated, rejected, ...status });
 }

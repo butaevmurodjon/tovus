@@ -1,4 +1,5 @@
 import type { GroupSettings } from "@/lib/db/types";
+import { t, type Lang } from "@/lib/i18n";
 
 /**
  * Combot's own public free tier is "free under 200 members" — we use that as
@@ -26,8 +27,16 @@ export function isProActive(settings: PlanFields): boolean {
   return settings.planExpiresAt > Date.now();
 }
 
+/**
+ * `null` means the member-count lookup is currently unknown/failing, not that the
+ * group is small — treating unknown as "doesn't require Pro" would fail OPEN,
+ * silently giving paid features to a group of any size for as long as the lookup
+ * stays broken. Failing closed here costs a small free-tier group a temporary
+ * captcha/antiraid outage during an infra hiccup, which is a far cheaper mistake
+ * than an unbounded entitlement bypass on a paid gate.
+ */
 export function requiresProForSize(memberCount: number | null): boolean {
-  return memberCount !== null && memberCount > FREE_TIER_MAX_MEMBERS;
+  return memberCount === null || memberCount > FREE_TIER_MAX_MEMBERS;
 }
 
 /**
@@ -37,4 +46,18 @@ export function requiresProForSize(memberCount: number | null): boolean {
  */
 export function canUseProFeature(settings: PlanFields, memberCount: number | null): boolean {
   return isProActive(settings) || !requiresProForSize(memberCount);
+}
+
+/** Shared so the bot (Node) and Mini App (browser) render the exact same date, not four
+ * independently-maintained copies of the same uz-UZ/ru-RU branch. */
+export function formatPlanDate(expiresAtMs: number | null | undefined, lang: Lang): string {
+  if (!expiresAtMs) return "—";
+  return new Date(expiresAtMs).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU");
+}
+
+/** The single-line "PRO до {date}" / "Базовый" label used by the /settings, /plan, and payment-confirmation bot messages. */
+export function formatPlanLabel(settings: PlanFields, lang: Lang): string {
+  return isProActive(settings)
+    ? t(lang, "bot.planPro", { date: formatPlanDate(settings.planExpiresAt, lang) })
+    : t(lang, "bot.planFree");
 }

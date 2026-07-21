@@ -10,7 +10,7 @@ import {
 import { addCustomWord, addCustomWords, getCustomWords, removeCustomWord } from "@/lib/db/customWords";
 import { getStats } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
-import { canUseProFeature, FREE_TIER_MAX_MEMBERS, isProActive } from "@/lib/billing/plan";
+import { canUseProFeature, formatPlanLabel, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
 import { PRESETS, isPresetKey } from "@/lib/moderation/presets";
 import { detectLang, isLang, t, type Lang } from "@/lib/i18n";
 import type { ViolationAction } from "@/lib/db/types";
@@ -105,14 +105,7 @@ export function registerCommands(bot: Bot): void {
       logChannel: settings.logChannelId ? String(settings.logChannelId) : t(lang, "miniapp.logChannelNotSet"),
     });
 
-    const planLabel = isProActive(settings)
-      ? t(lang, "bot.planPro", {
-          date: settings.planExpiresAt
-            ? new Date(settings.planExpiresAt).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU")
-            : "—",
-        })
-      : t(lang, "bot.planFree");
-    message += "\n" + t(lang, "bot.planStatusLine", { plan: planLabel });
+    message += "\n" + t(lang, "bot.planStatusLine", { plan: formatPlanLabel(settings, lang) });
 
     const perms = await getBotPermissions(ctx.api, ctx.chat!.id);
     const warning = formatPermissionWarning(
@@ -173,14 +166,7 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireGroupChat(ctx, lang))) return;
     const settings = await getGroupSettings(ctx.chat!.id);
     if (!settings) return;
-    const planLabel = isProActive(settings)
-      ? t(lang, "bot.planPro", {
-          date: settings.planExpiresAt
-            ? new Date(settings.planExpiresAt).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU")
-            : "—",
-        })
-      : t(lang, "bot.planFree");
-    await ctx.reply(t(lang, "bot.planStatusLine", { plan: planLabel }));
+    await ctx.reply(t(lang, "bot.planStatusLine", { plan: formatPlanLabel(settings, lang) }));
   });
 
   bot.command("preset", async (ctx) => {

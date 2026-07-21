@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { authorizeGroupAdmin } from "@/lib/telegram/miniAppAuth";
-import { getGroupSettings, getWhitelist, updateGroupSettings } from "@/lib/db/groups";
+import { getGroupSettings, updateGroupSettings } from "@/lib/db/groups";
 import { getApi } from "@/lib/telegram/api";
 import { getBotPermissions, missingPermissionsFor } from "@/lib/telegram/adminCheck";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
@@ -43,11 +43,11 @@ export async function GET(req: Request, { params }: { params: Promise<{ groupId:
   const auth = await authorizeGroupAdmin(req, chatId);
   if (!auth.ok) return NextResponse.json({ error: "forbidden" }, { status: auth.status });
 
-  const [settings, whitelist] = await Promise.all([getGroupSettings(chatId), getWhitelist(chatId)]);
+  const settings = await getGroupSettings(chatId);
   if (!settings) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const status = await buildStatusFields(chatId, settings);
-  return NextResponse.json({ settings, whitelist, ...status });
+  return NextResponse.json({ settings, ...status });
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ groupId: string }> }) {

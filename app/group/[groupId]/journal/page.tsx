@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useApp } from "@/contexts/AppProvider";
 import { useGroup } from "@/contexts/GroupProvider";
 import { Card, CardSection } from "@/components/Card";
@@ -10,7 +10,9 @@ import { SegmentedControl } from "@/components/SegmentedControl";
 import { JournalItem } from "@/components/JournalItem";
 import { StatusScreen } from "@/components/StatusScreen";
 import { haptic, hapticNotify, confirmAction } from "@/lib/miniapp/telegram";
-import { PRESET_KEYS, type PresetKey } from "@/lib/moderation/presets";
+import { ApiError } from "@/lib/miniapp/api";
+import { optimisticUpdate } from "@/lib/miniapp/optimistic";
+import { PRESETS, PRESET_KEYS, type PresetKey } from "@/lib/moderation/presets";
 import type { JournalEntry } from "@/lib/db/types";
 
 const PRESET_LABEL_KEY: Record<PresetKey, string> = {
@@ -21,13 +23,28 @@ const PRESET_LABEL_KEY: Record<PresetKey, string> = {
 };
 
 type Tab = "journal" | "whitelist" | "words";
+type T = (key: string, params?: Record<string, string | number>) => string;
 
 export default function GroupJournalPage() {
   const { t, fetcher } = useApp();
   const [tab, setTab] = useState<Tab>("journal");
+  const [toast, setToast] = useState<string | null>(null);
+
+  function flash(message: string) {
+    setToast(message);
+    setTimeout(() => setToast((cur) => (cur === message ? null : cur)), 1600);
+  }
 
   return (
     <div className="px-4 py-4 flex flex-col gap-3">
+      {toast && (
+        <div
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-20 rounded-full px-3.5 py-1.5 text-[12px] font-medium"
+          style={{ background: "var(--ink)", color: "#fff" }}
+        >
+          {toast}
+        </div>
+      )}
       <SegmentedControl<Tab>
         value={tab}
         onChange={setTab}
@@ -39,8 +56,8 @@ export default function GroupJournalPage() {
         ]}
       />
       {tab === "journal" && <JournalTab t={t} fetcher={fetcher} />}
-      {tab === "whitelist" && <WhitelistTab t={t} />}
-      {tab === "words" && <WordFilterTab t={t} />}
+      {tab === "whitelist" && <WhitelistTab t={t} flash={flash} />}
+      {tab === "words" && <WordFilterTab t={t} flash={flash} />}
     </div>
   );
 }
@@ -49,8 +66,8 @@ function JournalTab({
   t,
   fetcher,
 }: {
-  t: (key: string, params?: Record<string, string | number>) => string;
-  fetcher: <T>(path: string, options?: RequestInit) => Promise<T>;
+  t: T;
+  fetcher: <R>(path: string, options?: RequestInit) => Promise<R>;
 }) {
   const { chatId } = useGroup();
   const [entries, setEntries] = useState<JournalEntry[] | null>(null);
@@ -123,23 +140,95 @@ function JournalTab({
   );
 }
 
-function WhitelistTab({ t }: { t: (key: string, params?: Record<string, string | number>) => string }) {
-  const { whitelist, addWhitelistUser, removeWhitelistUser, clearWhitelistAll } = useGroup();
+/**
+ * Whitelist and custom-words are only ever read on this page (neither
+ * settings, stats, nor the layout shell need them), so they're fetched here
+ * as local per-tab state rather than bundled into GroupProvider's shared
+ * load() — a hiccup fetching one no longer takes down settings/stats too,
+ * and visiting a tab that doesn't need them no longer fetches them at all.
+ */
+function WhitelistTab({ t, flash }: { t: T; flash: (message: string) => void }) {
+  const { chatId } = useGroup();
+  const { fetcher } = useApp();
+  const [whitelist, setWhitelist] = useState<number[] | null>(null);
   const [input, setInput] = useState("");
+
+  const fetchWhitelist = useCallback(
+    async () => (await fetcher<{ whitelist: number[] }>(`/api/miniapp/groups/${chatId}/whitelist`)).whitelist,
+    [chatId, fetcher]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWhitelist()
+      .then((list) => !cancelled && setWhitelist(list))
+      .catch(() => !cancelled && setWhitelist([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchWhitelist]);
 
   async function add() {
     const id = Number(input.trim());
     if (!Number.isFinite(id)) return;
     haptic("light");
     setInput("");
-    await addWhitelistUser(id);
+    try {
+      await optimisticUpdate<number[] | null>(
+        setWhitelist,
+        (cur) => (cur && !cur.includes(id) ? [...cur, id] : cur),
+        async () =>
+          (
+            await fetcher<{ whitelist: number[] }>(`/api/miniapp/groups/${chatId}/whitelist`, {
+              method: "POST",
+              body: JSON.stringify({ userId: id }),
+            })
+          ).whitelist,
+        fetchWhitelist
+      );
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
+  }
+
+  async function remove(id: number) {
+    try {
+      await optimisticUpdate<number[] | null>(
+        setWhitelist,
+        (cur) => (cur ? cur.filter((x) => x !== id) : cur),
+        async () =>
+          (
+            await fetcher<{ whitelist: number[] }>(`/api/miniapp/groups/${chatId}/whitelist?userId=${id}`, {
+              method: "DELETE",
+            })
+          ).whitelist,
+        fetchWhitelist
+      );
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
   }
 
   async function clearAll() {
     const confirmed = await confirmAction(t("miniapp.confirmDeleteAllWhitelist"));
     if (!confirmed) return;
     haptic("medium");
-    await clearWhitelistAll();
+    try {
+      await optimisticUpdate<number[] | null>(
+        setWhitelist,
+        () => [],
+        async () => {
+          await fetcher(`/api/miniapp/groups/${chatId}/whitelist?all=1`, { method: "DELETE" });
+          return [];
+        },
+        fetchWhitelist
+      );
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
   }
 
   return (
@@ -147,29 +236,25 @@ function WhitelistTab({ t }: { t: (key: string, params?: Record<string, string |
       <CardSection title={t("miniapp.whitelistTitle")} subtitle={t("miniapp.whitelistHint")}>
         <div className="flex items-center justify-between mb-3">
           <span className="text-[12px]" style={{ color: "var(--ink-muted)" }}>
-            {whitelist.length}
+            {whitelist?.length ?? 0}
           </span>
-          {whitelist.length > 0 && (
+          {whitelist !== null && whitelist.length > 0 && (
             <Button variant="danger" onClick={clearAll}>
               {t("miniapp.deleteAll")}
             </Button>
           )}
         </div>
         <div className="flex flex-wrap gap-1.5 mb-3">
-          {whitelist.length === 0 && (
+          {whitelist !== null && whitelist.length === 0 && (
             <span className="text-[12px]" style={{ color: "var(--ink-muted)" }}>
               —
             </span>
           )}
-          {whitelist.map((id) => (
+          {(whitelist ?? []).map((id) => (
             <Badge key={id} variant="neutral">
               <span className="flex items-center gap-1.5">
                 id{id}
-                <button
-                  onClick={() => removeWhitelistUser(id)}
-                  aria-label={t("common.remove")}
-                  className="font-bold"
-                >
+                <button onClick={() => remove(id)} aria-label={t("common.remove")} className="font-bold">
                   ×
                 </button>
               </span>
@@ -195,32 +280,121 @@ function WhitelistTab({ t }: { t: (key: string, params?: Record<string, string |
   );
 }
 
-function WordFilterTab({ t }: { t: (key: string, params?: Record<string, string | number>) => string }) {
-  const { customWords, addCustomWordEntry, removeCustomWordEntry, clearCustomWordsAll, applyPreset } = useGroup();
+function WordFilterTab({ t, flash }: { t: T; flash: (message: string) => void }) {
+  const { chatId } = useGroup();
+  const { fetcher } = useApp();
+  const [customWords, setCustomWords] = useState<string[] | null>(null);
   const [input, setInput] = useState("");
   const [applying, setApplying] = useState<PresetKey | null>(null);
+
+  const fetchWords = useCallback(
+    async () => (await fetcher<{ words: string[] }>(`/api/miniapp/groups/${chatId}/customwords`)).words,
+    [chatId, fetcher]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchWords()
+      .then((words) => !cancelled && setCustomWords(words))
+      .catch(() => !cancelled && setCustomWords([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchWords]);
 
   async function add() {
     const word = input.trim();
     if (!word) return;
     haptic("light");
     setInput("");
-    await addCustomWordEntry(word);
+    try {
+      await optimisticUpdate<string[] | null>(
+        setCustomWords,
+        (cur) => (cur ? Array.from(new Set([...cur, word.toLowerCase()])).sort() : cur),
+        async () =>
+          (
+            await fetcher<{ words: string[] }>(`/api/miniapp/groups/${chatId}/customwords`, {
+              method: "POST",
+              body: JSON.stringify({ word }),
+            })
+          ).words,
+        fetchWords
+      );
+    } catch (err) {
+      hapticNotify("error");
+      flash(err instanceof ApiError && err.status === 409 ? t("miniapp.customWordCapReached") : t("miniapp.errorToast"));
+    }
+  }
+
+  async function remove(word: string) {
+    try {
+      await optimisticUpdate<string[] | null>(
+        setCustomWords,
+        (cur) => (cur ? cur.filter((w) => w !== word) : cur),
+        async () =>
+          (
+            await fetcher<{ words: string[] }>(
+              `/api/miniapp/groups/${chatId}/customwords?word=${encodeURIComponent(word)}`,
+              { method: "DELETE" }
+            )
+          ).words,
+        fetchWords
+      );
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
   }
 
   async function clearAll() {
     const confirmed = await confirmAction(t("miniapp.confirmDeleteAllWords"));
     if (!confirmed) return;
     haptic("medium");
-    await clearCustomWordsAll();
+    try {
+      await optimisticUpdate<string[] | null>(
+        setCustomWords,
+        () => [],
+        async () => {
+          await fetcher(`/api/miniapp/groups/${chatId}/customwords?all=1`, { method: "DELETE" });
+          return [];
+        },
+        fetchWords
+      );
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
   }
 
   async function apply(preset: PresetKey) {
     haptic("light");
     setApplying(preset);
-    const added = await applyPreset(preset);
+    let added: number | null = null;
+    try {
+      await optimisticUpdate<string[] | null>(
+        setCustomWords,
+        (cur) => Array.from(new Set([...(cur ?? []), ...PRESETS[preset]])).sort(),
+        async () => {
+          const data = await fetcher<{ added: number; words: string[] }>(`/api/miniapp/groups/${chatId}/presets`, {
+            method: "POST",
+            body: JSON.stringify({ preset }),
+          });
+          added = data.added;
+          return data.words;
+        },
+        fetchWords
+      );
+    } catch {
+      setApplying(null);
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+      return;
+    }
     setApplying(null);
-    hapticNotify(added > 0 ? "success" : "warning");
+    // `added` is a real, already-fetched count here (only null if the try block
+    // threw, which returns early above) — 0 is a legitimate "nothing new" outcome,
+    // distinct from a failure, which never reaches this line.
+    hapticNotify(added! > 0 ? "success" : "warning");
   }
 
   return (
@@ -259,11 +433,7 @@ function WordFilterTab({ t }: { t: (key: string, params?: Record<string, string 
               <Badge key={word} variant="neutral">
                 <span className="flex items-center gap-1.5">
                   {word}
-                  <button
-                    onClick={() => removeCustomWordEntry(word)}
-                    aria-label={t("common.remove")}
-                    className="font-bold"
-                  >
+                  <button onClick={() => remove(word)} aria-label={t("common.remove")} className="font-bold">
                     ×
                   </button>
                 </span>

@@ -32,7 +32,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ groupId
   const word = typeof body?.word === "string" ? body.word : "";
   if (!word.trim()) return NextResponse.json({ error: "invalid word" }, { status: 400 });
 
-  return NextResponse.json({ words: await addCustomWord(chatId, word) });
+  const { added, words } = await addCustomWord(chatId, word);
+  if (!added) return NextResponse.json({ error: "cap reached", words }, { status: 409 });
+  return NextResponse.json({ words });
 }
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ groupId: string }> }) {

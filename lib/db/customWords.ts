@@ -15,15 +15,20 @@ export function normalizeCustomWord(raw: string): string | null {
   return word.length > 0 ? word : null;
 }
 
-export async function addCustomWord(chatId: number, rawWord: string): Promise<string[]> {
+/** Returns `added: false` (word list unchanged) when the group is already at
+ * the cap — the caller must surface this, since silently no-op'ing here would
+ * otherwise look like the word vanished for no reason. */
+export async function addCustomWord(chatId: number, rawWord: string): Promise<{ added: boolean; words: string[] }> {
   const word = normalizeCustomWord(rawWord);
-  if (!word) return getCustomWords(chatId);
+  if (!word) return { added: false, words: await getCustomWords(chatId) };
   const redis = getRedis();
-  const count = await redis.scard(key(chatId));
-  if (count < MAX_CUSTOM_WORDS) {
+  const alreadyPresent = (await redis.sismember(key(chatId), word)) === 1;
+  if (!alreadyPresent) {
+    const count = await redis.scard(key(chatId));
+    if (count >= MAX_CUSTOM_WORDS) return { added: false, words: await getCustomWords(chatId) };
     await redis.sadd(key(chatId), word);
   }
-  return getCustomWords(chatId);
+  return { added: true, words: await getCustomWords(chatId) };
 }
 
 export async function removeCustomWord(chatId: number, rawWord: string): Promise<string[]> {

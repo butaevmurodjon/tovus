@@ -76,7 +76,14 @@ export function openInvoice(url: string, onStatus?: (status: "paid" | "cancelled
     window.open(url, "_blank");
     return;
   }
-  wa.openInvoice(url, onStatus);
+  try {
+    wa.openInvoice(url, onStatus);
+  } catch {
+    // Same class of client bug confirmAction below works around: the method
+    // exists but throws instead of behaving predictably. Degrade the same way
+    // the "absent" branch above does, rather than losing Stars checkout entirely.
+    window.open(url, "_blank");
+  }
 }
 
 /** Native confirm sheet for destructive actions (clear-all). Falls back to
@@ -97,8 +104,16 @@ export function confirmAction(message: string): Promise<boolean> {
       } catch {
         resolve(window.confirm(message));
       }
+    }).catch(() => window.confirm(message));
+    // Some client versions implement showConfirm as a silent no-op — present,
+    // doesn't throw, but never invokes its callback either — which would hang
+    // this promise forever with no way for the caller to recover. Treat "no
+    // response within a few seconds" as declined: the safe default for a
+    // destructive action is to make the admin re-click, not to guess yes.
+    const noResponse = new Promise<boolean>((resolve) => {
+      setTimeout(() => resolve(false), 4000);
     });
-    return viaTelegram.catch(() => window.confirm(message));
+    return Promise.race([viaTelegram, noResponse]);
   }
   return Promise.resolve(window.confirm(message));
 }

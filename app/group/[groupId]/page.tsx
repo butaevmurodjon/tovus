@@ -91,7 +91,15 @@ export default function GroupSettingsPage() {
   async function toggleProFeature(key: "captchaEnabled" | "antiraidEnabled", value: boolean) {
     haptic("light");
     try {
-      await updateSettings({ [key]: value } as never);
+      // A single-key patch that's ineligible always empties the server's patch
+      // and throws 402 today (caught below) — but `rejected` is also checked
+      // here so this keeps working correctly if this ever becomes part of a
+      // multi-field patch, where a rejection comes back as a 200 instead.
+      const rejected = await updateSettings({ [key]: value } as never);
+      if (rejected.includes(key)) {
+        hapticNotify("error");
+        flash(t("miniapp.proLockedHint", { limit: FREE_TIER_MAX_MEMBERS }));
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 402) {
         hapticNotify("error");

@@ -278,8 +278,8 @@ export function registerCommands(bot: Bot): void {
     }
     if ((action === "add" || action === "remove") && word) {
       if (action === "add") {
-        await addCustomWord(ctx.chat!.id, word);
-        await ctx.reply(t(lang, "bot.customWordAdded", { word }));
+        const { added } = await addCustomWord(ctx.chat!.id, word);
+        await ctx.reply(t(lang, added ? "bot.customWordAdded" : "bot.customWordCapReached", { word }));
       } else {
         await removeCustomWord(ctx.chat!.id, word);
         await ctx.reply(t(lang, "bot.customWordRemoved", { word }));

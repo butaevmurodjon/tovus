@@ -1,6 +1,8 @@
 import type { Message, MessageEntity } from "grammy/types";
 import {
   CTA_PHRASES,
+  DANGEROUS_FILE_EXTENSIONS,
+  DANGEROUS_MIME_TYPES,
   DOMAIN_BLACKLIST,
   LINK_COUNT_THRESHOLD,
   MENTION_COUNT_THRESHOLD,
@@ -67,6 +69,29 @@ function findMaskedLink(text: string, entities: MessageEntity[] | undefined): st
   return null;
 }
 
+/**
+ * .apk/.exe/.jar-style attachments — fake "official bank/gov app" installers are
+ * the dominant malware vector in these group chats, and scammers routinely send
+ * them with no caption at all, so this must not depend on message text existing.
+ * Both file_name and mime_type are sender-supplied (spoofable), but scammers here
+ * generally aren't hiding the extension — the ".apk" is often part of the pitch.
+ */
+function findDangerousFile(message: Message): string | null {
+  const doc = message.document;
+  if (!doc) return null;
+
+  const name = doc.file_name?.toLowerCase() ?? "";
+  const extMatch = name.match(/\.([a-z0-9]+)$/);
+  const ext = extMatch?.[1];
+  if (ext && DANGEROUS_FILE_EXTENSIONS.includes(ext)) return `.${ext}`;
+
+  if (doc.mime_type && DANGEROUS_MIME_TYPES.includes(doc.mime_type.toLowerCase())) {
+    return doc.mime_type;
+  }
+
+  return null;
+}
+
 function containsCta(text: string): boolean {
   const lower = text.toLowerCase();
   return CTA_PHRASES.some((phrase) => lower.includes(phrase));
@@ -81,6 +106,11 @@ function countMentions(entities: MessageEntity[] | undefined): number {
  * forwarded-channel-ad pattern, mass mentions.
  */
 export function detectSpam(message: Message): SpamResult {
+  const dangerousFile = findDangerousFile(message);
+  if (dangerousFile) {
+    return { matched: true, reason: `опасный тип файла: ${dangerousFile}`, severity: "high" };
+  }
+
   const text = message.text ?? message.caption ?? "";
   const entities = message.entities ?? message.caption_entities;
   if (!text) return { matched: false };

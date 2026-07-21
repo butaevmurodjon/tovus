@@ -13,6 +13,16 @@ function msg(text: string, entities?: MessageEntity[], forward_origin?: Message[
   } as unknown as Message;
 }
 
+function docMsg(document: Partial<NonNullable<Message["document"]>>, caption?: string): Message {
+  return {
+    message_id: 1,
+    date: 0,
+    chat: { id: 1, type: "supergroup", title: "t" },
+    document: { file_id: "f1", file_unique_id: "u1", ...document },
+    caption,
+  } as unknown as Message;
+}
+
 describe("detectSpam", () => {
   it("does not double-count a single link parsed as a Telegram URL entity (regression)", () => {
     // Before the fix, the entity-derived link AND the regex fallback scan both ran
@@ -106,5 +116,40 @@ describe("detectSpam", () => {
   it("does not flag an @mention without any CTA phrase", () => {
     const result = detectSpam(msg("@friend как дела?", [{ type: "mention", offset: 0, length: 7 }]));
     expect(result.matched).toBe(false);
+  });
+
+  it("flags an .apk file even with no caption at all (regression — scam APKs are usually sent bare)", () => {
+    const result = detectSpam(docMsg({ file_name: "Mobile_Bank_Update.apk" }));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+    expect(result.reason).toContain(".apk");
+  });
+
+  it("flags Windows/script executables by extension (.exe, .bat, .jar, .ps1)", () => {
+    for (const name of ["setup.exe", "install.bat", "loader.jar", "run.ps1"]) {
+      expect(detectSpam(docMsg({ file_name: name })).matched).toBe(true);
+    }
+  });
+
+  it("falls back to mime_type when the extension is stripped or renamed", () => {
+    const result = detectSpam(
+      docMsg({ file_name: "photo.jpg", mime_type: "application/vnd.android.package-archive" })
+    );
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+  });
+
+  it("is case-insensitive on the extension", () => {
+    expect(detectSpam(docMsg({ file_name: "App.APK" })).matched).toBe(true);
+  });
+
+  it("does not flag ordinary document types", () => {
+    for (const name of ["contract.pdf", "photo.jpg", "report.docx", "data.xlsx"]) {
+      expect(detectSpam(docMsg({ file_name: name })).matched).toBe(false);
+    }
+  });
+
+  it("does not flag a document with no file_name and a safe mime_type", () => {
+    expect(detectSpam(docMsg({ mime_type: "application/pdf" })).matched).toBe(false);
   });
 });

@@ -421,9 +421,13 @@ export default function GroupSettingsPage() {
                 disabled={busy}
               />
             </Row>
-            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
-              {proFeaturesEligible ? t("miniapp.captchaHint") : t("miniapp.proLockedHint", { limit: FREE_TIER_MAX_MEMBERS })}
-            </p>
+            <ProFeatureHint
+              eligible={proFeaturesEligible}
+              enabled={settings.captchaEnabled}
+              normalHint={t("miniapp.captchaHint")}
+              t={t}
+              className="mb-3"
+            />
             <Divider />
             <Row
               label={
@@ -439,13 +443,53 @@ export default function GroupSettingsPage() {
                 disabled={busy}
               />
             </Row>
-            <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
-              {proFeaturesEligible ? t("miniapp.antiraidHint") : t("miniapp.proLockedHint", { limit: FREE_TIER_MAX_MEMBERS })}
-            </p>
+            <ProFeatureHint
+              eligible={proFeaturesEligible}
+              enabled={settings.antiraidEnabled}
+              normalHint={t("miniapp.antiraidHint")}
+              t={t}
+            />
           </Collapsible>
         </CardSection>
       </Card>
     </div>
+  );
+}
+
+function ProFeatureHint({
+  eligible,
+  enabled,
+  normalHint,
+  t,
+  className = "",
+}: {
+  eligible: boolean;
+  enabled: boolean;
+  normalHint: string;
+  t: (key: string, params?: Record<string, string | number>) => string;
+  className?: string;
+}) {
+  if (eligible) {
+    return (
+      <p className={`text-[12px] mt-1 ${className}`} style={{ color: "var(--ink-muted)" }}>
+        {normalHint}
+      </p>
+    );
+  }
+  // Distinct from the plain "locked" case: this setting is ON in storage but not
+  // currently being enforced (group outgrew the free tier / subscription lapsed) —
+  // silently doing nothing here would be confusing, since the toggle still shows "on".
+  if (enabled) {
+    return (
+      <p className={`text-[12px] mt-1 ${className}`} style={{ color: "#a3401f" }}>
+        {t("miniapp.proNotEnforcedHint", { limit: FREE_TIER_MAX_MEMBERS })}
+      </p>
+    );
+  }
+  return (
+    <p className={`text-[12px] mt-1 ${className}`} style={{ color: "var(--ink-muted)" }}>
+      {t("miniapp.proLockedHint", { limit: FREE_TIER_MAX_MEMBERS })}
+    </p>
   );
 }
 

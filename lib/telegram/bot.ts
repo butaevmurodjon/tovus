@@ -101,24 +101,28 @@ export function getBot(): Bot {
     await ctx.answerPreCheckoutQuery(true);
   });
 
+  // Registered ahead of, and NOT scoped to, the group-only handler below: a payment
+  // started via the Mini App's openInvoice() can land as a successful_payment in the
+  // bot's private chat with the admin rather than in the group itself. The target
+  // group is always resolved from the invoice payload, never from where the
+  // confirmation happened to arrive — see createUpgradeInvoiceLink.
+  bot.on("message:successful_payment", async (ctx) => {
+    const payment = ctx.message.successful_payment;
+    const targetChatId = parseProPayload(payment.invoice_payload) ?? ctx.chat.id;
+    const expiresAtMs = payment.subscription_expiration_date
+      ? payment.subscription_expiration_date * 1000
+      : Date.now() + 30 * 24 * 60 * 60 * 1000;
+    await activateProPlan(targetChatId, expiresAtMs);
+    const settings = await getGroupSettings(targetChatId);
+    const lang = settings?.lang ?? "ru";
+    const dateLabel = new Date(expiresAtMs).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU");
+    await ctx.reply(t(lang, "bot.paymentThanks", { date: dateLabel })).catch(() => {});
+  });
+
   bot.on(["message", "edited_message"], async (ctx) => {
     const message = ctx.message ?? ctx.editedMessage;
     const chat = ctx.chat;
     if (!message || !chat || (chat.type !== "group" && chat.type !== "supergroup")) return;
-
-    if (message.successful_payment) {
-      const payment = message.successful_payment;
-      const targetChatId = parseProPayload(payment.invoice_payload) ?? chat.id;
-      const expiresAtMs = payment.subscription_expiration_date
-        ? payment.subscription_expiration_date * 1000
-        : Date.now() + 30 * 24 * 60 * 60 * 1000;
-      await activateProPlan(targetChatId, expiresAtMs);
-      const settings = await getGroupSettings(targetChatId);
-      const lang = settings?.lang ?? "ru";
-      const dateLabel = new Date(expiresAtMs).toLocaleDateString(lang === "uz" ? "uz-UZ" : "ru-RU");
-      await ctx.api.sendMessage(chat.id, t(lang, "bot.paymentThanks", { date: dateLabel })).catch(() => {});
-      return;
-    }
 
     const settings = await getGroupSettings(chat.id);
 

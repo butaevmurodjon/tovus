@@ -62,6 +62,15 @@ export function missingPermissionsFor(ctx: PermissionContext, perms: BotPermissi
   return missing;
 }
 
+/** Every reason restrict rights are actually needed here — the action alone may not be why. */
+function restrictReasons(lang: Lang, ctx: PermissionContext): string[] {
+  const reasons: string[] = [];
+  if (ctx.action === "mute" || ctx.action === "ban") reasons.push(t(lang, `bot.actionNames.${ctx.action}`));
+  if (ctx.captchaEnabled) reasons.push(t(lang, "miniapp.captchaTitle"));
+  if (ctx.antiraidEnabled) reasons.push(t(lang, "miniapp.antiraidTitle"));
+  return reasons;
+}
+
 /** Renders the permission gap as chat text, or null when everything needed is in place. */
 export function formatPermissionWarning(lang: Lang, ctx: PermissionContext, perms: BotPermissions): string | null {
   const missing = missingPermissionsFor(ctx, perms);
@@ -70,7 +79,12 @@ export function formatPermissionWarning(lang: Lang, ctx: PermissionContext, perm
   if (missing.includes("admin")) lines.push(`• ${t(lang, "bot.permMissingAdmin")}`);
   if (missing.includes("delete")) lines.push(`• ${t(lang, "bot.permMissingDelete")}`);
   if (missing.includes("restrict")) {
-    lines.push(`• ${t(lang, "bot.permMissingRestrict", { action: t(lang, `bot.actionNames.${ctx.action}`) })}`);
+    // Falls back to the action name if somehow nothing else qualified — missingPermissionsFor
+    // only ever sets "restrict" when at least one of these is actually true, so this is just
+    // a defensive default, not expected in practice.
+    const reasons = restrictReasons(lang, ctx);
+    const reasonText = reasons.length > 0 ? reasons.join(", ") : t(lang, `bot.actionNames.${ctx.action}`);
+    lines.push(`• ${t(lang, "bot.permMissingRestrict", { action: reasonText })}`);
   }
   return lines.join("\n");
 }

@@ -83,25 +83,29 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
   }
 
   // Turning captcha/antiraid OFF is always allowed; turning ON requires Pro eligibility.
+  // Member count is fetched at most once even if both are toggled on in the same request.
+  const togglingOnProFeature =
+    (typeof body.captchaEnabled === "boolean" && body.captchaEnabled) ||
+    (typeof body.antiraidEnabled === "boolean" && body.antiraidEnabled);
+  const eligible = togglingOnProFeature
+    ? canUseProFeature(current, await getCachedMemberCount(getApi(), chatId))
+    : true;
+
   if (typeof body.captchaEnabled === "boolean") {
     if (!body.captchaEnabled) {
       patch.captchaEnabled = false;
+    } else if (!eligible) {
+      return NextResponse.json({ error: "pro required" }, { status: 402 });
     } else {
-      const memberCount = await getCachedMemberCount(getApi(), chatId);
-      if (!canUseProFeature(current, memberCount)) {
-        return NextResponse.json({ error: "pro required" }, { status: 402 });
-      }
       patch.captchaEnabled = true;
     }
   }
   if (typeof body.antiraidEnabled === "boolean") {
     if (!body.antiraidEnabled) {
       patch.antiraidEnabled = false;
+    } else if (!eligible) {
+      return NextResponse.json({ error: "pro required" }, { status: 402 });
     } else {
-      const memberCount = await getCachedMemberCount(getApi(), chatId);
-      if (!canUseProFeature(current, memberCount)) {
-        return NextResponse.json({ error: "pro required" }, { status: 402 });
-      }
       patch.antiraidEnabled = true;
     }
   }

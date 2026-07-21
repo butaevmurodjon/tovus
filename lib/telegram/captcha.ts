@@ -99,10 +99,19 @@ export async function sweepExpiredCaptchas(api: Api, chatId: number): Promise<vo
     const stillActive = await redis.exists(stateKey(chatId, userId));
     if (stillActive) continue;
 
-    await redis.srem(pendingSetKey(chatId), userId);
     await api.banChatMember(chatId, userId).catch(() => {});
-    await api.unbanChatMember(chatId, userId, { only_if_banned: true }).catch((err) => {
-      if (!(err instanceof GrammyError)) throw err;
-    });
+    const unbanned = await api
+      .unbanChatMember(chatId, userId, { only_if_banned: true })
+      .then(() => true)
+      .catch((err) => {
+        if (!(err instanceof GrammyError)) throw err;
+        return false;
+      });
+    // Only clear the pending marker once the kick fully round-tripped (ban + unban).
+    // If unban failed transiently, leave the marker so the next sweep retries it —
+    // otherwise a flaky call here would leave someone permanently banned.
+    if (unbanned) {
+      await redis.srem(pendingSetKey(chatId), userId);
+    }
   }
 }

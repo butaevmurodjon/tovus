@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local AI-agent tooling (Vercel integration skill docs, not app code)
+.agents/
+.claude/
+skills-lock.json

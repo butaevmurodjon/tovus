@@ -60,6 +60,13 @@ export async function getUserAdminGroupIds(userId: number): Promise<number[]> {
   return (ids ?? []).map(Number);
 }
 
+/** The reverse direction — used by federation to find which real people
+ * administer a given chat, before looking up each of their other groups. */
+export async function getGroupAdminIds(chatId: number): Promise<number[]> {
+  const ids = await getRedis().smembers<string[]>(groupAdminsKey(chatId));
+  return (ids ?? []).map(Number);
+}
+
 /** Called when the bot leaves/is removed — drops this chat out of every
  * admin's reverse index so it doesn't dangle forever pointing at a group the
  * bot can no longer even look up. */

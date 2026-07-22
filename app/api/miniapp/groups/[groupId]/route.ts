@@ -31,6 +31,7 @@ async function buildStatusFields(chatId: number, settings: GroupSettings) {
       // antiraidAuto defaults true — a group can be silently protected (and
       // need restrict rights) even with the visible toggle off.
       antiraidEnabled: settings.antiraidEnabled || settings.antiraidAuto,
+      federationEnabled: settings.federationEnabled,
     },
     botPermissions
   );
@@ -105,11 +106,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
     patch.welcomeMessage = body.welcomeMessage === null ? null : normalizeWelcomeMessage(body.welcomeMessage);
   }
 
-  // Turning captcha/antiraid OFF is always allowed; turning ON requires Pro eligibility.
-  // Member count is fetched at most once even if both are toggled on in the same request.
+  // Turning captcha/antiraid/federation OFF is always allowed; turning ON requires Pro eligibility.
+  // Member count is fetched at most once even if several are toggled on in the same request.
   const togglingOnProFeature =
     (typeof body.captchaEnabled === "boolean" && body.captchaEnabled) ||
-    (typeof body.antiraidEnabled === "boolean" && body.antiraidEnabled);
+    (typeof body.antiraidEnabled === "boolean" && body.antiraidEnabled) ||
+    (typeof body.federationEnabled === "boolean" && body.federationEnabled);
   const eligible = togglingOnProFeature
     ? canUseProFeature(current, await getCachedMemberCount(getApi(), chatId))
     : true;
@@ -126,6 +128,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
       patch.antiraidEnabled = body.antiraidEnabled;
     } else {
       rejected.push("antiraidEnabled");
+    }
+  }
+  if (typeof body.federationEnabled === "boolean") {
+    if (!body.federationEnabled || eligible) {
+      patch.federationEnabled = body.federationEnabled;
+    } else {
+      rejected.push("federationEnabled");
     }
   }
 

@@ -57,6 +57,7 @@ export function getBot(): Bot {
           // antiraidAuto defaults true, so a group can be silently protected
           // (and need restrict rights) even with the visible toggle off.
           antiraidEnabled: settings?.antiraidEnabled || settings?.antiraidAuto,
+          federationEnabled: settings?.federationEnabled,
         },
         {
           isAdmin: true,

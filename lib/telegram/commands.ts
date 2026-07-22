@@ -117,6 +117,7 @@ export function registerCommands(bot: Bot): void {
         // antiraidAuto defaults true — a group can be silently protected (and
         // need restrict rights) even with the visible toggle off.
         antiraidEnabled: settings.antiraidEnabled || settings.antiraidAuto,
+        federationEnabled: settings.federationEnabled,
       },
       perms
     );
@@ -159,6 +160,17 @@ export function registerCommands(bot: Bot): void {
     if (arg === "on" && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
     await updateGroupSettings(ctx.chat!.id, { antiraidEnabled: arg === "on" });
     await ctx.reply(t(lang, arg === "on" ? "bot.antiraidOn" : "bot.antiraidOff"));
+  });
+
+  bot.command("federation", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim().toLowerCase();
+    if (arg !== "on" && arg !== "off") return ctx.reply(t(lang, "bot.federationUsage"));
+    if (arg === "on" && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
+    await updateGroupSettings(ctx.chat!.id, { federationEnabled: arg === "on" });
+    await ctx.reply(t(lang, arg === "on" ? "bot.federationOn" : "bot.federationOff"));
   });
 
   bot.command("upgrade", async (ctx) => {

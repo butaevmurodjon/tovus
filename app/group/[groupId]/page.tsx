@@ -98,7 +98,7 @@ export default function GroupSettingsPage() {
     }
   }
 
-  async function toggleProFeature(key: "captchaEnabled" | "antiraidEnabled", value: boolean) {
+  async function toggleProFeature(key: "captchaEnabled" | "antiraidEnabled" | "federationEnabled", value: boolean) {
     haptic("light");
     try {
       // A single-key patch that's ineligible always empties the server's patch
@@ -305,6 +305,27 @@ export default function GroupSettingsPage() {
               eligible={proFeaturesEligible}
               enabled={settings.antiraidEnabled}
               normalHint={t("miniapp.antiraidHint")}
+              t={t}
+              className="mb-3"
+            />
+            <Divider />
+            <Row
+              label={
+                <span className="flex items-center gap-1.5">
+                  {t("miniapp.federationTitle")}
+                  {!proFeaturesEligible && <Badge variant="warning">PRO</Badge>}
+                </span>
+              }
+            >
+              <Toggle
+                checked={settings.federationEnabled}
+                onChange={(v) => toggleProFeature("federationEnabled", v)}
+              />
+            </Row>
+            <ProFeatureHint
+              eligible={proFeaturesEligible}
+              enabled={settings.federationEnabled}
+              normalHint={t("miniapp.federationHint")}
               t={t}
             />
           </Collapsible>

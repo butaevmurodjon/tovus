@@ -81,15 +81,20 @@ export interface PermissionContext {
   /** Captcha/antiraid both mute-then-unmute members, so they need restrict rights too. */
   captchaEnabled?: boolean;
   antiraidEnabled?: boolean;
+  /** A federated group can receive a propagated ban regardless of its own
+   * configured action, so it needs restrict rights too even if its own
+   * action is "delete". */
+  federationEnabled?: boolean;
 }
 
-/** Which capabilities the configured action (and captcha/antiraid, if on) need that the bot doesn't currently have. */
+/** Which capabilities the configured action (and captcha/antiraid/federation, if on) need that the bot doesn't currently have. */
 export function missingPermissionsFor(ctx: PermissionContext, perms: BotPermissions): string[] {
   if (!perms.isAdmin) return ["admin"];
   const missing: string[] = [];
   // Every action deletes the offending message first.
   if (!perms.canDeleteMessages) missing.push("delete");
-  const needsRestrict = ctx.action === "mute" || ctx.action === "ban" || ctx.captchaEnabled || ctx.antiraidEnabled;
+  const needsRestrict =
+    ctx.action === "mute" || ctx.action === "ban" || ctx.captchaEnabled || ctx.antiraidEnabled || ctx.federationEnabled;
   if (needsRestrict && !perms.canRestrictMembers) missing.push("restrict");
   return missing;
 }
@@ -100,6 +105,7 @@ function restrictReasons(lang: Lang, ctx: PermissionContext): string[] {
   if (ctx.action === "mute" || ctx.action === "ban") reasons.push(t(lang, `bot.actionNames.${ctx.action}`));
   if (ctx.captchaEnabled) reasons.push(t(lang, "miniapp.captchaTitle"));
   if (ctx.antiraidEnabled) reasons.push(t(lang, "miniapp.antiraidTitle"));
+  if (ctx.federationEnabled) reasons.push(t(lang, "miniapp.federationTitle"));
   return reasons;
 }
 

@@ -7,6 +7,7 @@ import { addJournalEntry } from "@/lib/db/journal";
 import { incrementStat } from "@/lib/db/stats";
 import { t } from "@/lib/i18n";
 import { displayName, mentionHtml } from "./format";
+import { propagateBan } from "./federation";
 
 const MUTE_DURATION_SECONDS = 60 * 60; // 1h
 
@@ -42,6 +43,10 @@ export async function applyViolation(
   ]);
 
   await notifyChat(api, chatId, user, settings, verdict, effectiveAction);
+
+  if (effectiveAction === "ban" && settings.federationEnabled) {
+    await propagateBan(api, chatId, user, verdict.reason).catch(() => {});
+  }
 }
 
 async function logToJournal(

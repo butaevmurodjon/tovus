@@ -25,6 +25,11 @@ export interface GroupSettings {
    * `antiraidEnabled` off also clears this (see updateGroupSettings), so
    * "off" in the UI means fully off, not silently still-protected. */
   antiraidAuto: boolean;
+  /** Opt-in ban sharing: when true, a bot-triggered ban here also bans the
+   * same user in every OTHER group this group's current admins also manage
+   * that has this on too. Trust boundary is shared admin identity — never
+   * spreads to a group with no admin in common with this one. */
+  federationEnabled: boolean;
   welcomeEnabled: boolean;
   /** May contain the literal placeholder "{user}", substituted with an HTML mention on send. */
   welcomeMessage: string | null;
@@ -42,6 +47,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   captchaEnabled: false,
   antiraidEnabled: false,
   antiraidAuto: true,
+  federationEnabled: false,
   welcomeEnabled: false,
   welcomeMessage: null,
   plan: "free",

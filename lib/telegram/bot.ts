@@ -1,5 +1,6 @@
 import { Bot, webhookCallback } from "grammy";
 import { getGroupSettings, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
+import { clearGroupAdmins, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
 import { incrementActivity } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { canUseProFeature, formatPlanDate } from "@/lib/billing/plan";
@@ -33,8 +34,13 @@ export function getBot(): Bot {
 
     if (newMember.status === "member" || newMember.status === "administrator") {
       await registerGroup(chat.id, chat.title ?? "", detectLang(update.from.language_code));
+      // Seed the admin reverse index from scratch — we have no history of who
+      // was already admin before the bot joined/was promoted, so this is the
+      // only way to learn it. Ongoing changes are tracked incrementally below.
+      await syncGroupAdmins(ctx.api, chat.id).catch(() => {});
     } else if (newMember.status === "left" || newMember.status === "kicked") {
       await unregisterGroup(chat.id);
+      await clearGroupAdmins(chat.id).catch(() => {});
       return;
     }
 
@@ -73,6 +79,17 @@ export function getBot(): Bot {
     const isIn = ["member", "restricted"].includes(update.new_chat_member.status);
     if (!wasIn && isIn) {
       await markNewMember(chat.id, update.new_chat_member.user.id);
+    }
+
+    // Keep the userId -> adminGroups reverse index (used by the Mini App
+    // dashboard, see app/api/miniapp/groups/route.ts) in sync with real admin
+    // status changes, not just joins/leaves.
+    if (!update.new_chat_member.user.is_bot) {
+      const wasAdmin = ["administrator", "creator"].includes(update.old_chat_member.status);
+      const isAdmin = ["administrator", "creator"].includes(update.new_chat_member.status);
+      if (wasAdmin !== isAdmin) {
+        await setUserAdminStatus(chat.id, update.new_chat_member.user.id, isAdmin).catch(() => {});
+      }
     }
   });
 

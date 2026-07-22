@@ -16,7 +16,8 @@ export interface ModerationVerdict {
 
 export async function moderateMessage(
   message: Message,
-  settings: GroupSettings
+  settings: GroupSettings,
+  options: { isEdit?: boolean } = {}
 ): Promise<ModerationVerdict | null> {
   const text = message.text ?? message.caption ?? "";
   const chatId = settings.chatId;
@@ -42,7 +43,14 @@ export async function moderateMessage(
       return { category: "spam", reason: spamResult.reason ?? "спам", forceWarnOnly };
     }
 
-    if (userId) {
+    // Flood counters model the RATE of message events, not their content — an
+    // edit isn't a new event (the user didn't send another message), so it must
+    // not feed these counters. Without this guard, someone fixing a typo via
+    // "edit" a few times within the flood window gets muted/banned for flooding
+    // that never happened, and per-chat "messages" stats get inflated by edits.
+    // Content checks above (profanity/spam patterns) still run on edits — an
+    // edit into bad content must still be caught.
+    if (userId && !options.isEdit) {
       const [userFlood, dupFlood] = await Promise.all([
         checkUserFlood(chatId, userId),
         text ? checkDuplicateFlood(chatId, text) : Promise.resolve(false),

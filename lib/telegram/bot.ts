@@ -126,6 +126,7 @@ export function getBot(): Bot {
 
   bot.on(["message", "edited_message"], async (ctx) => {
     const message = ctx.message ?? ctx.editedMessage;
+    const isEdit = !ctx.message;
     const chat = ctx.chat;
     if (!message || !chat || (chat.type !== "group" && chat.type !== "supergroup")) return;
 
@@ -156,10 +157,10 @@ export function getBot(): Bot {
     if (!from || from.is_bot) return;
     if (!settings) return;
 
-    await Promise.all([
-      sweepExpiredCaptchas(ctx.api, chat.id).catch(() => {}),
-      incrementActivity(chat.id, "messages").catch(() => {}),
-    ]);
+    // An edit isn't a new message — don't count it toward "messages" activity stats.
+    const sideEffects = [sweepExpiredCaptchas(ctx.api, chat.id).catch(() => {})];
+    if (!isEdit) sideEffects.push(incrementActivity(chat.id, "messages").catch(() => {}));
+    await Promise.all(sideEffects);
 
     const [admin, whitelisted] = await Promise.all([
       isChatAdmin(ctx.api, chat.id, from.id),
@@ -167,7 +168,7 @@ export function getBot(): Bot {
     ]);
     if (admin || whitelisted) return;
 
-    const verdict = await moderateMessage(message, settings);
+    const verdict = await moderateMessage(message, settings, { isEdit });
     if (!verdict) return;
 
     await applyViolation(ctx.api, message, settings, verdict);

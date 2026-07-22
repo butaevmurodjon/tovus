@@ -41,20 +41,33 @@ export async function clearCustomWords(chatId: number): Promise<void> {
   await getRedis().del(key(chatId));
 }
 
+// SCARD-then-SADD as separate round-trips would be a TOCTOU race: two
+// concurrent calls (two presets applied back to back, or a preset racing a
+// manual add) could both read the same pre-write count, both see room, and
+// both add — overshooting MAX_CUSTOM_WORDS. A Lua script runs atomically on
+// the Redis server, so the read-room/add-until-full loop can't interleave
+// with anything else touching this key.
+const ADD_BATCH_SCRIPT = `
+local key = KEYS[1]
+local max = tonumber(ARGV[1])
+local room = max - redis.call('SCARD', key)
+if room <= 0 then return 0 end
+local added = 0
+for i = 2, #ARGV do
+  if added >= room then break end
+  if redis.call('SADD', key, ARGV[i]) == 1 then added = added + 1 end
+end
+return added
+`;
+
 /** Adds a batch of words (e.g. an industry preset), respecting the same per-group cap. Returns how many were actually added. */
 export async function addCustomWords(chatId: number, rawWords: string[]): Promise<{ added: number; words: string[] }> {
   const redis = getRedis();
-  const before = await redis.scard(key(chatId));
-  const room = Math.max(0, MAX_CUSTOM_WORDS - before);
   const cleaned = Array.from(new Set(rawWords.map(normalizeCustomWord).filter((w): w is string => w !== null)));
-  const toAdd = cleaned.slice(0, room);
-  // Genuinely-new count, not attempted count: some of `toAdd` may already be in
-  // the set (a preset re-applied, or overlap with words a user added manually).
-  let added = 0;
-  if (toAdd.length > 0) {
-    const [first, ...rest] = toAdd;
-    added = await redis.sadd(key(chatId), first, ...rest);
-  }
+  const added =
+    cleaned.length > 0
+      ? await redis.eval<string[], number>(ADD_BATCH_SCRIPT, [key(chatId)], [String(MAX_CUSTOM_WORDS), ...cleaned])
+      : 0;
   const words = await getCustomWords(chatId);
   return { added, words };
 }

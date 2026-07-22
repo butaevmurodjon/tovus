@@ -175,7 +175,8 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireGroupChat(ctx, lang))) return;
     if (!(await requireAdmin(ctx, lang))) return;
     const arg = ctx.match?.toString().trim().toLowerCase();
-    if (!arg || !isPresetKey(arg)) return ctx.reply(t(lang, "bot.presetUsage"));
+    if (!arg) return ctx.reply(t(lang, "bot.presetUsage"));
+    if (!isPresetKey(arg)) return ctx.reply(t(lang, "bot.presetUnknown"));
     const { added } = await addCustomWords(ctx.chat!.id, PRESETS[arg]);
     await ctx.reply(t(lang, "bot.presetApplied", { preset: arg, count: added }));
   });

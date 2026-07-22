@@ -40,12 +40,22 @@ function estimateTokens(text: string): number {
   return Math.ceil((SYSTEM_PROMPT.length + text.length) / 4) + COMPLETION_TOKEN_BUDGET;
 }
 
+/**
+ * GET-then-compare-then-INCRBY would be a classic TOCTOU race: two concurrent
+ * serverless invocations can both read the same `current` before either writes,
+ * both see headroom, and both proceed — overshooting `max`. INCRBY first
+ * (atomic in Redis) and check the result instead; if it pushed the total over
+ * `max`, decrement the reservation back out so a request that's about to be
+ * denied doesn't permanently eat into the rest of the window's headroom.
+ */
 async function withinTokenBudget(key: string, ttlSeconds: number, max: number, tokens: number): Promise<boolean> {
   const redis = getRedis();
-  const current = Number((await redis.get<number>(key)) ?? 0);
-  if (current + tokens > max) return false;
   const next = await redis.incrby(key, tokens);
   if (next === tokens) await redis.expire(key, ttlSeconds);
+  if (next > max) {
+    await redis.decrby(key, tokens);
+    return false;
+  }
   return true;
 }
 

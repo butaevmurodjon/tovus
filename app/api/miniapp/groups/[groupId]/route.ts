@@ -3,6 +3,7 @@ import { authorizeGroupAdmin } from "@/lib/telegram/miniAppAuth";
 import { getGroupSettings, updateGroupSettings } from "@/lib/db/groups";
 import { getApi } from "@/lib/telegram/api";
 import { getBotPermissions, missingPermissionsFor } from "@/lib/telegram/adminCheck";
+import { normalizeWelcomeMessage } from "@/lib/telegram/welcome";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { canUseProFeature } from "@/lib/billing/plan";
 import { isLang } from "@/lib/i18n";
@@ -79,7 +80,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
   }
   if (typeof body.welcomeEnabled === "boolean") patch.welcomeEnabled = body.welcomeEnabled;
   if (body.welcomeMessage === null || typeof body.welcomeMessage === "string") {
-    patch.welcomeMessage = body.welcomeMessage;
+    patch.welcomeMessage = body.welcomeMessage === null ? null : normalizeWelcomeMessage(body.welcomeMessage);
   }
 
   // Turning captcha/antiraid OFF is always allowed; turning ON requires Pro eligibility.

@@ -16,6 +16,7 @@ import { detectLang, isLang, t, type Lang } from "@/lib/i18n";
 import type { ViolationAction } from "@/lib/db/types";
 import { formatPermissionWarning, getBotPermissions, isChatAdmin } from "./adminCheck";
 import { sendUpgradeInvoice } from "./payments";
+import { normalizeWelcomeMessage } from "./welcome";
 
 function miniAppButtonUrl(startParam: string): string | null {
   const username = process.env.TELEGRAM_BOT_USERNAME;
@@ -190,7 +191,7 @@ export function registerCommands(bot: Bot): void {
       await ctx.reply(t(lang, "bot.welcomeCleared"));
       return;
     }
-    await updateGroupSettings(ctx.chat!.id, { welcomeEnabled: true, welcomeMessage: raw });
+    await updateGroupSettings(ctx.chat!.id, { welcomeEnabled: true, welcomeMessage: normalizeWelcomeMessage(raw) });
     await ctx.reply(t(lang, "bot.welcomeSet"));
   });
 

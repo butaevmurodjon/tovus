@@ -8,8 +8,16 @@ export type QuotaPool = "free" | "pro";
 // Conservative guards under the Groq free-tier limits for this model
 // (30 RPM / 1K RPD / 12K TPM / 100K TPD as of 2026), split into two pools so a
 // burst of free-tier groups can never starve a paying Pro group's quota — the
-// "dedicated AI quota" perk. Numbers are a starting split, adjustable; they
-// intentionally leave headroom under the account-wide ceiling.
+// "dedicated AI quota" perk. Numbers intentionally leave headroom under the
+// account-wide ceiling and are adjustable.
+//
+// Free's pool is deliberately the LARGER raw number, not a mistake: there are
+// expected to be far more free groups than Pro ones (freemium funnel), so the
+// free pool needs more headroom just to avoid falling back to base rules
+// under normal free-tier volume. Pro's actual perk isn't a bigger number —
+// it's a pool free-tier traffic can structurally never touch, so a paying
+// group's quota can't be starved by anyone else's burst. Reviewed and kept
+// as-is 2026-07-22.
 const BUDGETS: Record<QuotaPool, { rpm: number; rpd: number; tpm: number; tpd: number }> = {
   pro: { rpm: 8, rpd: 300, tpm: 3500, tpd: 30_000 },
   free: { rpm: 17, rpd: 600, tpm: 6500, tpd: 60_000 },

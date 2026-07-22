@@ -14,7 +14,7 @@ import { canUseProFeature, formatPlanLabel, FREE_TIER_MAX_MEMBERS } from "@/lib/
 import { PRESETS, isPresetKey } from "@/lib/moderation/presets";
 import { detectLang, isLang, t, type Lang } from "@/lib/i18n";
 import type { ViolationAction } from "@/lib/db/types";
-import { formatPermissionWarning, getBotPermissions, isChatAdmin } from "./adminCheck";
+import { formatPermissionWarning, getBotPermissions, isBotAdminOfChat, isChatAdmin } from "./adminCheck";
 import { sendUpgradeInvoice } from "./payments";
 import { normalizeWelcomeMessage } from "./welcome";
 
@@ -302,9 +302,7 @@ export function registerCommands(bot: Bot): void {
     }
     try {
       const chat = await ctx.api.getChat(/^-?\d+$/.test(arg) ? Number(arg) : arg);
-      const me = await ctx.api.getMe();
-      const member = await ctx.api.getChatMember(chat.id, me.id);
-      if (member.status !== "administrator" && member.status !== "creator") {
+      if (!(await isBotAdminOfChat(ctx.api, chat.id))) {
         return ctx.reply(t(lang, "bot.logChannelUsage"));
       }
       await updateGroupSettings(ctx.chat!.id, { logChannelId: chat.id });

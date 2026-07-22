@@ -61,11 +61,21 @@ export default function GroupSettingsPage() {
     if (logChannelId !== null && !Number.isFinite(logChannelId)) return;
     setSavingLogChannel(true);
     try {
-      await updateSettings({ logChannelId });
-      flash(t("miniapp.savedToast"));
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
+      const rejected = await updateSettings({ logChannelId });
+      if (rejected.includes("logChannelId")) {
+        hapticNotify("error");
+        flash(t("miniapp.logChannelNotAdmin"));
+      } else {
+        flash(t("miniapp.savedToast"));
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.message === "log channel not admin") {
+        hapticNotify("error");
+        flash(t("miniapp.logChannelNotAdmin"));
+      } else {
+        hapticNotify("error");
+        flash(t("miniapp.errorToast"));
+      }
     } finally {
       setSavingLogChannel(false);
     }

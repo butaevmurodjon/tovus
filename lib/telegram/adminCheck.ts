@@ -19,6 +19,21 @@ export async function isChatAdmin(api: Api, chatId: number, userId: number): Pro
   }
 }
 
+/** Whether the bot itself is currently an admin of the given chat — used to
+ * gate accepting a log-channel id, since forwarding there silently no-ops
+ * forever (each attempt just .catch()es) if the bot was never actually made
+ * an admin of that channel. */
+export async function isBotAdminOfChat(api: Api, chatId: number): Promise<boolean> {
+  try {
+    const me = await api.getMe();
+    const member = await api.getChatMember(chatId, me.id);
+    return ADMIN_STATUSES.has(member.status);
+  } catch (err) {
+    if (err instanceof GrammyError) return false;
+    throw err;
+  }
+}
+
 export interface BotPermissions {
   isAdmin: boolean;
   canDeleteMessages: boolean;

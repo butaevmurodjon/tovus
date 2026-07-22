@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { authorizeGroupAdmin } from "@/lib/telegram/miniAppAuth";
 import { getGroupSettings, updateGroupSettings } from "@/lib/db/groups";
 import { getApi } from "@/lib/telegram/api";
-import { getBotPermissions, missingPermissionsFor } from "@/lib/telegram/adminCheck";
+import { getBotPermissions, isBotAdminOfChat, missingPermissionsFor } from "@/lib/telegram/adminCheck";
 import { normalizeWelcomeMessage } from "@/lib/telegram/welcome";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { canUseProFeature } from "@/lib/billing/plan";
@@ -67,6 +67,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
   const current = await getGroupSettings(chatId);
   if (!current) return NextResponse.json({ error: "not found" }, { status: 404 });
 
+  // A field that's rejected (gated toggle ineligible, log channel the bot
+  // isn't actually admin of) is dropped individually, not the whole request —
+  // otherwise a mixed patch would silently drop unrelated valid fields too.
+  const rejected: string[] = [];
+
   const patch: Record<string, unknown> = {};
   if (typeof body.profanityFilter === "boolean") patch.profanityFilter = body.profanityFilter;
   if (typeof body.antispam === "boolean") patch.antispam = body.antispam;
@@ -75,8 +80,19 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
     patch.action = body.action;
   }
   if (isLang(body.lang)) patch.lang = body.lang;
-  if (body.logChannelId === null || typeof body.logChannelId === "number") {
-    patch.logChannelId = body.logChannelId;
+  if (body.logChannelId === null) {
+    patch.logChannelId = null;
+  } else if (typeof body.logChannelId === "number") {
+    // The bot command (/logchannel) already verifies this before saving — the
+    // Mini App accepted any number here with zero verification, so a typo'd
+    // or non-admin channel id saved silently, and every future violation's
+    // forward-to-log-channel attempt would just .catch() and vanish with no
+    // sign anything was ever wrong.
+    if (await isBotAdminOfChat(getApi(), body.logChannelId)) {
+      patch.logChannelId = body.logChannelId;
+    } else {
+      rejected.push("logChannelId");
+    }
   }
   if (typeof body.welcomeEnabled === "boolean") patch.welcomeEnabled = body.welcomeEnabled;
   if (body.welcomeMessage === null || typeof body.welcomeMessage === "string") {
@@ -92,10 +108,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
     ? canUseProFeature(current, await getCachedMemberCount(getApi(), chatId))
     : true;
 
-  // A gated toggle that fails eligibility is rejected individually, not the whole
-  // request — otherwise a mixed patch (e.g. a new welcome message alongside an
-  // ineligible captcha toggle) would silently drop the welcome-message change too.
-  const rejected: string[] = [];
   if (typeof body.captchaEnabled === "boolean") {
     if (!body.captchaEnabled || eligible) {
       patch.captchaEnabled = body.captchaEnabled;
@@ -112,6 +124,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
   }
 
   if (Object.keys(patch).length === 0) {
+    if (rejected.includes("logChannelId")) {
+      return NextResponse.json({ error: "log channel not admin", rejected }, { status: 422 });
+    }
     return NextResponse.json({ error: "pro required", rejected }, { status: 402 });
   }
 

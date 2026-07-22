@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { formatPermissionWarning, missingPermissionsFor, type BotPermissions } from "./adminCheck";
+import type { Api } from "grammy";
+import { GrammyError } from "grammy";
+import { formatPermissionWarning, isChatAdmin, missingPermissionsFor, type BotPermissions } from "./adminCheck";
 
 const fullPerms: BotPermissions = { isAdmin: true, canDeleteMessages: true, canRestrictMembers: true };
 const noRestrictPerms: BotPermissions = { isAdmin: true, canDeleteMessages: true, canRestrictMembers: false };
@@ -45,5 +47,44 @@ describe("formatPermissionWarning — attributes the restrict requirement correc
 
   it("returns null when nothing is missing", () => {
     expect(formatPermissionWarning("ru", { action: "ban" }, fullPerms)).toBeNull();
+  });
+});
+
+describe("isChatAdmin", () => {
+  function fakeApi(getChatMember: Api["getChatMember"]): Api {
+    return { getChatMember } as unknown as Api;
+  }
+
+  it("returns true for administrator/creator", async () => {
+    const api = fakeApi(async () => ({ status: "administrator" }) as never);
+    expect(await isChatAdmin(api, 1, 2)).toBe(true);
+  });
+
+  it("returns false for a GrammyError (real answer, e.g. user not in chat) without retrying", async () => {
+    let calls = 0;
+    const api = fakeApi(async () => {
+      calls++;
+      throw new GrammyError("Bad Request", { ok: false, error_code: 400, description: "Bad Request" }, "getChatMember", {});
+    });
+    expect(await isChatAdmin(api, 1, 2)).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  it("retries once on a transient failure instead of aborting the whole moderation path (regression)", async () => {
+    let calls = 0;
+    const api = fakeApi(async () => {
+      calls++;
+      if (calls === 1) throw new Error("network timeout");
+      return { status: "member" } as never;
+    });
+    expect(await isChatAdmin(api, 1, 2)).toBe(false);
+    expect(calls).toBe(2);
+  });
+
+  it("still throws after two consecutive transient failures, so the caller can decide how to fail closed", async () => {
+    const api = fakeApi(async () => {
+      throw new Error("network timeout");
+    });
+    await expect(isChatAdmin(api, 1, 2)).rejects.toThrow("network timeout");
   });
 });

@@ -5,18 +5,35 @@ import { t, type Lang } from "@/lib/i18n";
 
 const ADMIN_STATUSES = new Set(["creator", "administrator"]);
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Live-checks admin status via getChatMember so that a user who lost their
  * admin rights loses access immediately — no cached role is trusted.
+ *
+ * A GrammyError (e.g. "user not found", chat/user genuinely inaccessible) is
+ * a real answer — false — and returned immediately. A non-GrammyError
+ * (network blip, timeout) gets one retry, since this sits directly in the
+ * per-message moderation path: the caller (bot.ts) still moderates the
+ * message even if this ultimately fails, so an unnecessary throw here isn't
+ * fatal, but it does cost the moderation path a beat — worth one retry
+ * before giving up.
  */
 export async function isChatAdmin(api: Api, chatId: number, userId: number): Promise<boolean> {
-  try {
-    const member = await api.getChatMember(chatId, userId);
-    return ADMIN_STATUSES.has(member.status);
-  } catch (err) {
-    if (err instanceof GrammyError) return false;
-    throw err;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const member = await api.getChatMember(chatId, userId);
+      return ADMIN_STATUSES.has(member.status);
+    } catch (err) {
+      if (err instanceof GrammyError) return false;
+      if (attempt === 2) throw err;
+      await sleep(250);
+    }
   }
+  /* istanbul ignore next -- unreachable, loop always returns or throws */
+  return false;
 }
 
 /** Whether the bot itself is currently an admin of the given chat — used to

@@ -179,10 +179,23 @@ export function getBot(): Bot {
     if (!isEdit) sideEffects.push(incrementActivity(chat.id, "messages").catch(() => {}));
     await Promise.all(sideEffects);
 
-    const [admin, whitelisted] = await Promise.all([
-      isChatAdmin(ctx.api, chat.id, from.id),
-      isWhitelisted(chat.id, from.id),
-    ]);
+    // A failure here must not silently skip moderation for this message — an
+    // uncaught rejection would abort the whole handler before moderateMessage
+    // ever runs, so a transient Telegram/Redis blip becomes an unlogged,
+    // invisible gap where spam/profanity passes straight through. Fail
+    // closed toward "still moderate": an admin's message getting a false
+    // positive during a rare blip is a far smaller cost than every message
+    // silently skipping moderation for the rest of that blip's duration.
+    let admin = false;
+    let whitelisted = false;
+    try {
+      [admin, whitelisted] = await Promise.all([
+        isChatAdmin(ctx.api, chat.id, from.id),
+        isWhitelisted(chat.id, from.id),
+      ]);
+    } catch (err) {
+      console.error("[bot] admin/whitelist check failed, moderating anyway", chat.id, from.id, err);
+    }
     if (admin || whitelisted) return;
 
     const verdict = await moderateMessage(message, settings, { isEdit });

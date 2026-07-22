@@ -54,7 +54,9 @@ export function getBot(): Bot {
         {
           action: settings?.action ?? "delete",
           captchaEnabled: settings?.captchaEnabled,
-          antiraidEnabled: settings?.antiraidEnabled,
+          // antiraidAuto defaults true, so a group can be silently protected
+          // (and need restrict rights) even with the visible toggle off.
+          antiraidEnabled: settings?.antiraidEnabled || settings?.antiraidAuto,
         },
         {
           isAdmin: true,
@@ -158,7 +160,12 @@ export function getBot(): Bot {
         await Promise.all(
           newMembers.map(async (member) => {
             await incrementActivity(chat.id, "joins").catch(() => {});
-            const isRaid = settings.antiraidEnabled && eligible ? await checkRaid(chat.id) : false;
+            // antiraidAuto defaults true — raid detection runs for any eligible
+            // group even if the admin never touched the manual toggle. It's
+            // still the SAME single checkRaid() call either way, just gated by
+            // a broader condition, not a second independent check.
+            const antiraidActive = settings.antiraidEnabled || settings.antiraidAuto;
+            const isRaid = antiraidActive && eligible ? await checkRaid(chat.id) : false;
             if ((settings.captchaEnabled && eligible) || isRaid) {
               await startCaptcha(ctx.api, chat.id, member, settings.lang).catch(() => {});
             } else if (settings.welcomeEnabled && settings.welcomeMessage) {

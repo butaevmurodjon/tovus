@@ -25,7 +25,13 @@ async function buildStatusFields(chatId: number, settings: GroupSettings) {
     getCachedMemberCount(api, chatId),
   ]);
   const missingPermissions = missingPermissionsFor(
-    { action: settings.action, captchaEnabled: settings.captchaEnabled, antiraidEnabled: settings.antiraidEnabled },
+    {
+      action: settings.action,
+      captchaEnabled: settings.captchaEnabled,
+      // antiraidAuto defaults true — a group can be silently protected (and
+      // need restrict rights) even with the visible toggle off.
+      antiraidEnabled: settings.antiraidEnabled || settings.antiraidAuto,
+    },
     botPermissions
   );
   return {

@@ -31,7 +31,9 @@ export async function GET(req: Request) {
       const permCtx = {
         action: settings.action,
         captchaEnabled: settings.captchaEnabled,
-        antiraidEnabled: settings.antiraidEnabled,
+        // antiraidAuto defaults true — a group can be silently protected (and
+        // need restrict rights) even with the visible toggle off.
+        antiraidEnabled: settings.antiraidEnabled || settings.antiraidAuto,
       };
       return {
         chatId,

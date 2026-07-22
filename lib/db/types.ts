@@ -20,6 +20,11 @@ export interface GroupSettings {
   captchaEnabled: boolean;
   /** Mass-join detection; forces captcha verification on new members during a detected raid. Same eligibility gate as captcha. */
   antiraidEnabled: boolean;
+  /** Same raid detection, but on by default (not opt-in) — protection for
+   * groups that never touched `antiraidEnabled`. Explicitly turning
+   * `antiraidEnabled` off also clears this (see updateGroupSettings), so
+   * "off" in the UI means fully off, not silently still-protected. */
+  antiraidAuto: boolean;
   welcomeEnabled: boolean;
   /** May contain the literal placeholder "{user}", substituted with an HTML mention on send. */
   welcomeMessage: string | null;
@@ -36,6 +41,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   logChannelId: null,
   captchaEnabled: false,
   antiraidEnabled: false,
+  antiraidAuto: true,
   welcomeEnabled: false,
   welcomeMessage: null,
   plan: "free",

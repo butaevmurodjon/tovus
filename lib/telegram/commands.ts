@@ -111,7 +111,13 @@ export function registerCommands(bot: Bot): void {
     const perms = await getBotPermissions(ctx.api, ctx.chat!.id);
     const warning = formatPermissionWarning(
       lang,
-      { action: settings.action, captchaEnabled: settings.captchaEnabled, antiraidEnabled: settings.antiraidEnabled },
+      {
+        action: settings.action,
+        captchaEnabled: settings.captchaEnabled,
+        // antiraidAuto defaults true — a group can be silently protected (and
+        // need restrict rights) even with the visible toggle off.
+        antiraidEnabled: settings.antiraidEnabled || settings.antiraidAuto,
+      },
       perms
     );
     if (warning) message += "\n\n" + warning;

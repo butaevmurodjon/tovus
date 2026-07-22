@@ -52,13 +52,21 @@ export async function saveGroupSettings(settings: GroupSettings): Promise<void> 
   await getRedis().set(settingsKey(settings.chatId), settings);
 }
 
-export async function updateGroupSettings(
-  chatId: number,
-  patch: Partial<Omit<GroupSettings, "chatId">>
-): Promise<GroupSettings | null> {
+type SettingsPatch = Partial<Omit<GroupSettings, "chatId">>;
+
+/** Explicitly turning the manual antiraid toggle off must mean fully off —
+ * `antiraidAuto` defaults true, so without this cascade a group that once
+ * enabled and then disabled antiraid would silently stay protected via the
+ * automatic fallback, contradicting what the toggle shows. Exported for
+ * testing; not meant to be called directly outside updateGroupSettings. */
+export function applyAntiraidCascade(patch: SettingsPatch): SettingsPatch {
+  return patch.antiraidEnabled === false ? { ...patch, antiraidAuto: false } : patch;
+}
+
+export async function updateGroupSettings(chatId: number, patch: SettingsPatch): Promise<GroupSettings | null> {
   const current = await getGroupSettings(chatId);
   if (!current) return null;
-  const next: GroupSettings = { ...current, ...patch };
+  const next: GroupSettings = { ...current, ...applyAntiraidCascade(patch) };
   await saveGroupSettings(next);
   return next;
 }

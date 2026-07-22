@@ -126,7 +126,7 @@ export function registerCommands(bot: Bot): void {
     await ctx.reply(message);
   });
 
-  async function toggleCommand(name: string, key: "profanityFilter" | "antispam" | "captchaEnabled") {
+  async function toggleCommand(name: string, key: "profanityFilter" | "antispam" | "captchaEnabled" | "casCheckEnabled") {
     bot.command(name, async (ctx) => {
       const lang = await langFor(ctx);
       if (!(await requireGroupChat(ctx, lang))) return;
@@ -139,6 +139,7 @@ export function registerCommands(bot: Bot): void {
   }
   toggleCommand("filter_profanity", "profanityFilter");
   toggleCommand("antispam", "antispam");
+  toggleCommand("cascheck", "casCheckEnabled");
 
   bot.command("captcha", async (ctx) => {
     const lang = await langFor(ctx);

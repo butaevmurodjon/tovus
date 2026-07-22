@@ -83,6 +83,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
   if (typeof body.profanityFilter === "boolean") patch.profanityFilter = body.profanityFilter;
   if (typeof body.antispam === "boolean") patch.antispam = body.antispam;
   if (typeof body.premium === "boolean") patch.premium = body.premium;
+  if (typeof body.casCheckEnabled === "boolean") patch.casCheckEnabled = body.casCheckEnabled;
   if (typeof body.action === "string" && VALID_ACTIONS.includes(body.action as ViolationAction)) {
     patch.action = body.action;
   }

@@ -35,7 +35,7 @@ export default function GroupSettingsPage() {
   // Updates apply to the UI immediately (see GroupProvider.updateSettings) — no
   // blocking spinner needed here, just haptic feedback and an error toast if the
   // background request ends up failing.
-  async function toggle(key: "profanityFilter" | "antispam" | "premium", value: boolean) {
+  async function toggle(key: "profanityFilter" | "antispam" | "premium" | "casCheckEnabled", value: boolean) {
     haptic("light");
     try {
       await updateSettings({ [key]: value } as never);
@@ -210,6 +210,13 @@ export default function GroupSettingsPage() {
           <Row label={t("miniapp.antispam")}>
             <Toggle checked={settings.antispam} onChange={(v) => toggle("antispam", v)} />
           </Row>
+          <Divider />
+          <Row label={t("miniapp.casCheckTitle")}>
+            <Toggle checked={settings.casCheckEnabled} onChange={(v) => toggle("casCheckEnabled", v)} />
+          </Row>
+          <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
+            {t("miniapp.casCheckHint")}
+          </p>
           <Divider />
           <Row label={t("miniapp.premiumMode")}>
             <Toggle checked={settings.premium} onChange={(v) => toggle("premium", v)} />

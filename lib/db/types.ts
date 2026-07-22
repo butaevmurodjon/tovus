@@ -30,6 +30,10 @@ export interface GroupSettings {
    * that has this on too. Trust boundary is shared admin identity — never
    * spreads to a group with no admin in common with this one. */
   federationEnabled: boolean;
+  /** Checks new joiners against CAS (cas.chat) — a free shared database of
+   * known spam/scam accounts — and bans them on join, before they can post.
+   * Free for everyone (no Groq/size cost), on by default, opt-out. */
+  casCheckEnabled: boolean;
   welcomeEnabled: boolean;
   /** May contain the literal placeholder "{user}", substituted with an HTML mention on send. */
   welcomeMessage: string | null;
@@ -48,6 +52,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   antiraidEnabled: false,
   antiraidAuto: true,
   federationEnabled: false,
+  casCheckEnabled: true,
   welcomeEnabled: false,
   welcomeMessage: null,
   plan: "free",

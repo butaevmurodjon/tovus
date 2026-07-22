@@ -1,11 +1,12 @@
 import { Bot, webhookCallback } from "grammy";
 import { getGroupSettings, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
 import { clearGroupAdmins, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
-import { incrementActivity } from "@/lib/db/stats";
+import { incrementActivity, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { canUseProFeature, formatPlanDate } from "@/lib/billing/plan";
 import { moderateMessage } from "@/lib/moderation";
 import { checkRaid, markNewMember } from "@/lib/moderation/flood";
+import { isCasBanned } from "@/lib/moderation/cas";
 import { detectLang, t } from "@/lib/i18n";
 import { formatPermissionWarning, isChatAdmin } from "./adminCheck";
 import { registerCommands } from "./commands";
@@ -13,6 +14,7 @@ import { applyViolation } from "./violations";
 import { startCaptcha, sweepExpiredCaptchas, verifyCaptcha } from "./captcha";
 import { sendWelcomeMessage } from "./welcome";
 import { activateProPlan, parseProPayload } from "./payments";
+import { displayName } from "./format";
 
 let _bot: Bot | null = null;
 
@@ -160,6 +162,24 @@ export function getBot(): Bot {
         const eligible = canUseProFeature(settings, memberCount);
         await Promise.all(
           newMembers.map(async (member) => {
+            // CAS: a free, shared database of known spam/scam accounts, checked
+            // before anything else — catches professional spam bots on join,
+            // before they ever post a message our content filters could inspect.
+            // Free for everyone (no per-message/Groq cost), doesn't count as a
+            // real "join" (no captcha/welcome/antiraid, no activity stat) since
+            // the account never actually joins the community in any meaningful
+            // sense — it's removed immediately.
+            if (settings.casCheckEnabled && (await isCasBanned(member.id))) {
+              const banned = await ctx.api.banChatMember(chat.id, member.id).catch(() => false);
+              if (banned) {
+                await incrementStat(chat.id, "spam").catch(() => {});
+                await ctx.api
+                  .sendMessage(chat.id, t(settings.lang, "bot.casBanned", { user: displayName(member) }))
+                  .catch(() => {});
+              }
+              return;
+            }
+
             await incrementActivity(chat.id, "joins").catch(() => {});
             // antiraidAuto defaults true — raid detection runs for any eligible
             // group even if the admin never touched the manual toggle. It's

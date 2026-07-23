@@ -106,6 +106,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ groupI
   if (body.welcomeMessage === null || typeof body.welcomeMessage === "string") {
     patch.welcomeMessage = body.welcomeMessage === null ? null : normalizeWelcomeMessage(body.welcomeMessage);
   }
+  if (typeof body.warnEscalationEnabled === "boolean") patch.warnEscalationEnabled = body.warnEscalationEnabled;
+  if (typeof body.warnLimit === "number" && Number.isInteger(body.warnLimit) && body.warnLimit >= 0 && body.warnLimit <= 20) {
+    patch.warnLimit = body.warnLimit;
+  }
+  if (body.warnAction === "mute" || body.warnAction === "ban") patch.warnAction = body.warnAction;
 
   // Turning captcha/antiraid/federation OFF is always allowed; turning ON requires Pro eligibility.
   // Member count is fetched at most once even if several are toggled on in the same request.

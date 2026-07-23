@@ -239,6 +239,27 @@ export function registerCommands(bot: Bot): void {
     await ctx.reply(t(lang, "bot.actionSet", { action: t(lang, `bot.actionNames.${arg}`) }));
   });
 
+  bot.command("warnlimit", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim();
+    const n = Number(arg);
+    if (!arg || !Number.isInteger(n) || n < 0 || n > 20) return ctx.reply(t(lang, "bot.warnLimitUsage"));
+    await updateGroupSettings(ctx.chat!.id, { warnLimit: n || 3, warnEscalationEnabled: n > 0 });
+    await ctx.reply(n > 0 ? t(lang, "bot.warnLimitSet", { limit: n }) : t(lang, "bot.warnLimitDisabled"));
+  });
+
+  bot.command("warnaction", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim().toLowerCase();
+    if (arg !== "mute" && arg !== "ban") return ctx.reply(t(lang, "bot.warnActionUsage"));
+    await updateGroupSettings(ctx.chat!.id, { warnAction: arg });
+    await ctx.reply(t(lang, "bot.warnActionSet", { action: t(lang, `bot.actionNames.${arg}`) }));
+  });
+
   bot.command("lang", async (ctx) => {
     const lang = await langFor(ctx);
     if (!(await requireGroupChat(ctx, lang))) return;

@@ -34,6 +34,16 @@ export interface GroupSettings {
    * known spam/scam accounts — and bans them on join, before they can post.
    * Free for everyone (no Groq/size cost), on by default, opt-out. */
   casCheckEnabled: boolean;
+  /** Off by default: existing groups using action="warn" get exactly the
+   * behavior they always had unless they explicitly opt in — auto-escalating
+   * to mute/ban after N warns is a real behavior change (a false positive
+   * costs a real ban, not just a benign captcha click), so it must never turn
+   * on silently. */
+  warnEscalationEnabled: boolean;
+  /** Warns within `warnTtlDays` before escalating to `warnAction`. */
+  warnLimit: number;
+  warnAction: "mute" | "ban";
+  warnTtlDays: number;
   welcomeEnabled: boolean;
   /** May contain the literal placeholder "{user}", substituted with an HTML mention on send. */
   welcomeMessage: string | null;
@@ -53,6 +63,10 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   antiraidAuto: true,
   federationEnabled: false,
   casCheckEnabled: true,
+  warnEscalationEnabled: false,
+  warnLimit: 3,
+  warnAction: "mute",
+  warnTtlDays: 7,
   welcomeEnabled: false,
   welcomeMessage: null,
   plan: "free",

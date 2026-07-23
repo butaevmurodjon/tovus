@@ -98,6 +98,36 @@ export default function GroupSettingsPage() {
     }
   }
 
+  async function setWarnEscalation(enabled: boolean) {
+    haptic("light");
+    try {
+      await updateSettings({ warnEscalationEnabled: enabled });
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
+  }
+
+  async function setWarnLimit(limit: number) {
+    haptic("light");
+    try {
+      await updateSettings({ warnLimit: limit });
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
+  }
+
+  async function setWarnAction(action: "mute" | "ban") {
+    haptic("light");
+    try {
+      await updateSettings({ warnAction: action });
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
+  }
+
   async function toggleProFeature(key: "captchaEnabled" | "antiraidEnabled" | "federationEnabled", value: boolean) {
     haptic("light");
     try {
@@ -240,6 +270,50 @@ export default function GroupSettingsPage() {
               { value: "ban", label: t("miniapp.actionBan") },
             ]}
           />
+        </CardSection>
+      </Card>
+
+      <Card>
+        <CardSection>
+          <Row label={t("miniapp.warnEscalationTitle")}>
+            <Toggle checked={settings.warnEscalationEnabled} onChange={setWarnEscalation} />
+          </Row>
+          <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
+            {t("miniapp.warnEscalationHint")}
+          </p>
+          {settings.warnEscalationEnabled && (
+            <>
+              <div className="mt-3">
+                <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                  {t("miniapp.warnLimitLabel")}
+                </p>
+                <SegmentedControl
+                  value={String(settings.warnLimit)}
+                  onChange={(v) => setWarnLimit(Number(v))}
+                  columns={3}
+                  options={[
+                    { value: "3", label: "3" },
+                    { value: "5", label: "5" },
+                    { value: "10", label: "10" },
+                  ]}
+                />
+              </div>
+              <div className="mt-3">
+                <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                  {t("miniapp.warnActionLabel")}
+                </p>
+                <SegmentedControl
+                  value={settings.warnAction}
+                  onChange={setWarnAction}
+                  columns={2}
+                  options={[
+                    { value: "mute", label: t("miniapp.actionMute") },
+                    { value: "ban", label: t("miniapp.actionBan") },
+                  ]}
+                />
+              </div>
+            </>
+          )}
         </CardSection>
       </Card>
 

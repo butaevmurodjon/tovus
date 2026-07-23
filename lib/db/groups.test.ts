@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyAntiraidCascade } from "./groups";
+import { applyAntiraidCascade, applyWarnLimitCascade } from "./groups";
 
 describe("applyAntiraidCascade", () => {
   it("clears antiraidAuto when antiraidEnabled is explicitly turned off (regression)", () => {
@@ -24,5 +24,22 @@ describe("applyAntiraidCascade", () => {
       antiraidEnabled: false,
       antiraidAuto: false,
     });
+  });
+});
+
+describe("applyWarnLimitCascade", () => {
+  it("clears warnEscalationEnabled when the limit is explicitly set to 0 (regression)", () => {
+    expect(applyWarnLimitCascade({ warnLimit: 0 })).toEqual({
+      warnLimit: 0,
+      warnEscalationEnabled: false,
+    });
+  });
+
+  it("does not touch warnEscalationEnabled for a non-zero limit", () => {
+    expect(applyWarnLimitCascade({ warnLimit: 5 })).toEqual({ warnLimit: 5 });
+  });
+
+  it("leaves unrelated patches untouched", () => {
+    expect(applyWarnLimitCascade({ profanityFilter: false })).toEqual({ profanityFilter: false });
   });
 });

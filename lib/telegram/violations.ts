@@ -8,6 +8,7 @@ import { incrementStat } from "@/lib/db/stats";
 import { t } from "@/lib/i18n";
 import { displayName, mentionHtml } from "./format";
 import { propagateBan } from "./federation";
+import { clearWarns, recordWarn } from "@/lib/moderation/warns";
 
 const MUTE_DURATION_SECONDS = 60 * 60; // 1h
 
@@ -25,8 +26,22 @@ export async function applyViolation(
   const user = message.from;
   if (!user) return;
 
-  const effectiveAction: ViolationAction =
-    verdict.forceWarnOnly && settings.action !== "delete" ? "warn" : settings.action;
+  // A forced/leniency warn (new member's first message, first link) must
+  // never count toward escalation — it's deliberately "benefit of the
+  // doubt", not a real strike against a repeat offender.
+  const isForcedWarn = verdict.forceWarnOnly && settings.action !== "delete";
+  let effectiveAction: ViolationAction = isForcedWarn ? "warn" : settings.action;
+
+  let warnCount: number | null = null;
+  let escalated = false;
+  if (effectiveAction === "warn" && !isForcedWarn && settings.warnEscalationEnabled) {
+    warnCount = await recordWarn(chatId, user.id, settings.warnTtlDays).catch(() => null);
+    if (warnCount !== null && warnCount >= settings.warnLimit) {
+      effectiveAction = settings.warnAction;
+      escalated = true;
+      await clearWarns(chatId, user.id).catch(() => {});
+    }
+  }
 
   await api.deleteMessage(chatId, message.message_id).catch((err) => {
     if (!(err instanceof GrammyError)) throw err;
@@ -42,7 +57,7 @@ export async function applyViolation(
       : Promise.resolve(),
   ]);
 
-  await notifyChat(api, chatId, user, settings, verdict, effectiveAction);
+  await notifyChat(api, chatId, user, settings, verdict, effectiveAction, { warnCount, escalated });
 
   if (effectiveAction === "ban" && settings.federationEnabled) {
     await propagateBan(api, chatId, user, verdict.reason).catch(() => {});
@@ -99,18 +114,24 @@ async function notifyChat(
   user: User,
   settings: GroupSettings,
   verdict: ModerationVerdict,
-  action: ViolationAction
+  action: ViolationAction,
+  escalation: { warnCount: number | null; escalated: boolean }
 ) {
   const lang = settings.lang;
   const mention = mentionHtml(user);
+  const escalationSuffix = escalation.escalated
+    ? " " + t(lang, "bot.warnEscalated", { action: t(lang, `bot.actionNames.${action}`) })
+    : "";
 
   if (action === "delete") return; // silent removal, no extra chat noise
 
   if (action === "warn") {
     const key = verdict.forceWarnOnly ? "bot.firstMessageLinkWarn" : "bot.warnedUser";
-    await api.sendMessage(chatId, t(lang, key, { user: mention, reason: verdict.reason }), {
-      parse_mode: "HTML",
-    });
+    let text = t(lang, key, { user: mention, reason: verdict.reason });
+    if (!verdict.forceWarnOnly && settings.warnEscalationEnabled && escalation.warnCount !== null) {
+      text += " " + t(lang, "bot.warnCount", { count: escalation.warnCount, limit: settings.warnLimit });
+    }
+    await api.sendMessage(chatId, text, { parse_mode: "HTML" });
     return;
   }
 
@@ -133,7 +154,7 @@ async function notifyChat(
         { until_date: Math.floor(Date.now() / 1000) + MUTE_DURATION_SECONDS }
       )
       .catch(() => {});
-    await api.sendMessage(chatId, t(lang, "bot.mutedUser", { user: mention, reason: verdict.reason }), {
+    await api.sendMessage(chatId, t(lang, "bot.mutedUser", { user: mention, reason: verdict.reason }) + escalationSuffix, {
       parse_mode: "HTML",
     });
     return;
@@ -141,7 +162,7 @@ async function notifyChat(
 
   if (action === "ban") {
     await api.banChatMember(chatId, user.id).catch(() => {});
-    await api.sendMessage(chatId, t(lang, "bot.bannedUser", { user: mention, reason: verdict.reason }), {
+    await api.sendMessage(chatId, t(lang, "bot.bannedUser", { user: mention, reason: verdict.reason }) + escalationSuffix, {
       parse_mode: "HTML",
     });
   }

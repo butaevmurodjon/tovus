@@ -63,10 +63,20 @@ export function applyAntiraidCascade(patch: SettingsPatch): SettingsPatch {
   return patch.antiraidEnabled === false ? { ...patch, antiraidAuto: false } : patch;
 }
 
+/** Explicitly setting the warn limit to 0 must mean escalation is fully off —
+ * otherwise a stale `warnEscalationEnabled: true` from before would keep
+ * comparing warn counts against a limit of 0, escalating on the very first
+ * warn. Exported for testing; not meant to be called directly outside
+ * updateGroupSettings. */
+export function applyWarnLimitCascade(patch: SettingsPatch): SettingsPatch {
+  return patch.warnLimit === 0 ? { ...patch, warnEscalationEnabled: false } : patch;
+}
+
 export async function updateGroupSettings(chatId: number, patch: SettingsPatch): Promise<GroupSettings | null> {
   const current = await getGroupSettings(chatId);
   if (!current) return null;
-  const next: GroupSettings = { ...current, ...applyAntiraidCascade(patch) };
+  const cascaded = applyWarnLimitCascade(applyAntiraidCascade(patch));
+  const next: GroupSettings = { ...current, ...cascaded };
   await saveGroupSettings(next);
   return next;
 }

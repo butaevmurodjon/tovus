@@ -40,7 +40,11 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
   const [tick, setTick] = useState(0);
 
   const load = useCallback(() => {
-    if (appStatus !== "ready" || Number.isNaN(chatId)) return;
+    if (appStatus !== "ready") return;
+    if (!Number.isFinite(chatId)) {
+      setStatus("error");
+      return;
+    }
     let cancelled = false;
     setStatus("loading");
     fetcher<{ settings: GroupSettings } & GroupStatusFields>(`/api/miniapp/groups/${chatId}`)

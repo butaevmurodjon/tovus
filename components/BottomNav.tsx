@@ -17,7 +17,11 @@ export function BottomNav({ chatId }: { chatId: number }) {
   return (
     <nav
       className="fixed bottom-0 inset-x-0 flex items-stretch"
-      style={{ background: "var(--surface)", borderTop: "1px solid var(--border)" }}
+      style={{
+        background: "var(--surface)",
+        borderTop: "1px solid var(--border)",
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }}
     >
       {items.map((item) => {
         const active = pathname === item.href;

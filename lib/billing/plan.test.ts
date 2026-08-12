@@ -89,9 +89,9 @@ describe("formatPlanLabel", () => {
   });
 
   it("returns a pro label with the expiry date for an active subscription", () => {
-    const ms = new Date("2026-08-10T00:00:00Z").getTime();
+    const ms = new Date("2027-01-01T00:00:00Z").getTime();
     const label = formatPlanLabel({ plan: "pro", planExpiresAt: ms }, "ru");
     expect(label).toContain("PRO");
-    expect(label).toMatch(/2026/);
+    expect(label).toMatch(/2027/);
   });
 });

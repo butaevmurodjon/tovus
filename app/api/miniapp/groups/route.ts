@@ -24,28 +24,32 @@ export async function GET(req: Request) {
 
   const results = await Promise.all(
     chatIds.map(async (chatId): Promise<AdminGroupSummary | null> => {
-      const admin = await isChatAdmin(api, chatId, user.id).catch(() => false);
-      if (!admin) return null;
-      const [settings, botPermissions] = await Promise.all([getGroupSettings(chatId), getBotPermissions(api, chatId)]);
-      if (!settings) return null;
-      const permCtx = {
-        action: settings.action,
-        captchaEnabled: settings.captchaEnabled,
-        // antiraidAuto defaults true — a group can be silently protected (and
-        // need restrict rights) even with the visible toggle off.
-        antiraidEnabled: settings.antiraidEnabled || settings.antiraidAuto,
-        federationEnabled: settings.federationEnabled,
-      };
-      return {
-        chatId,
-        title: settings.title,
-        premium: settings.premium,
-        profanityFilter: settings.profanityFilter,
-        antispam: settings.antispam,
-        hasPermissionIssue: missingPermissionsFor(permCtx, botPermissions).length > 0,
-        plan: settings.plan,
-        isPro: isProActive(settings),
-      };
+      try {
+        const admin = await isChatAdmin(api, chatId, user.id).catch(() => false);
+        if (!admin) return null;
+        const [settings, botPermissions] = await Promise.all([getGroupSettings(chatId), getBotPermissions(api, chatId)]);
+        if (!settings) return null;
+        const permCtx = {
+          action: settings.action,
+          captchaEnabled: settings.captchaEnabled,
+          // antiraidAuto defaults true — a group can be silently protected (and
+          // need restrict rights) even with the visible toggle off.
+          antiraidEnabled: settings.antiraidEnabled || settings.antiraidAuto,
+          federationEnabled: settings.federationEnabled,
+        };
+        return {
+          chatId,
+          title: settings.title,
+          premium: settings.premium,
+          profanityFilter: settings.profanityFilter,
+          antispam: settings.antispam,
+          hasPermissionIssue: missingPermissionsFor(permCtx, botPermissions).length > 0,
+          plan: settings.plan,
+          isPro: isProActive(settings),
+        };
+      } catch {
+        return null;
+      }
     })
   );
 

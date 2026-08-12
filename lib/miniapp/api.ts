@@ -15,10 +15,23 @@ export function createFetcher(initData: string | null): Fetcher {
     if (initData) headers["Authorization"] = `tma ${initData}`;
 
     const res = await fetch(path, { ...options, headers });
+    const text = await res.text();
     if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
+      let body: { error?: string } = {};
+      try {
+        body = JSON.parse(text) as { error?: string };
+      } catch {
+        // тело ответа не является JSON — игнорируем
+      }
       throw new ApiError(res.status, body?.error ?? `HTTP ${res.status}`);
     }
-    return res.json();
+    if (!text) {
+      return undefined as T;
+    }
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new ApiError(res.status, "Invalid JSON response");
+    }
   };
 }

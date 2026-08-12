@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/telegram/miniAppAuth";
 import { getApi } from "@/lib/telegram/api";
 import { getBotPermissions, isChatAdmin, missingPermissionsFor } from "@/lib/telegram/adminCheck";
-import { getGroupSettings } from "@/lib/db/groups";
+import { getGroupSettings, listAllGroupIds } from "@/lib/db/groups";
 import { getUserAdminGroupIds } from "@/lib/db/admins";
 import { isProActive } from "@/lib/billing/plan";
 import type { AdminGroupSummary } from "@/lib/db/types";
@@ -22,17 +22,15 @@ export async function GET(req: Request) {
   // The live isChatAdmin check below stays as defense-in-depth in case the
   // index is stale (a missed chat_member update): it can only ever narrow
   // results, never grant access the index didn't already suggest.
-  let chatIds: number[] = [];
-  if (owner) {
-    try {
-      const me = await api.getMe();
-      chatIds = await getUserAdminGroupIds(me.id);
-    } catch {
-      chatIds = await getUserAdminGroupIds(user.id);
-    }
-  } else {
-    chatIds = await getUserAdminGroupIds(user.id);
-  }
+  //
+  // Owner exception: the adminGroups reverse index tracks *people* only — the
+  // bot itself is deliberately excluded by the is_bot filters in admins.ts /
+  // bot.ts — so getUserAdminGroupIds(me.id) for the bot's own id is always
+  // empty. That is why the b54b253 owner change silently emptied the owner's
+  // dashboard list. The owner manages the bot itself, so their scope is every
+  // group the bot is in (the bot:groups set), not just groups where they're
+  // personally an admin.
+  const chatIds = owner ? await listAllGroupIds() : await getUserAdminGroupIds(user.id);
 
   const results = await Promise.all(
     chatIds.map(async (chatId): Promise<AdminGroupSummary | null> => {

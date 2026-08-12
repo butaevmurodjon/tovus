@@ -24,9 +24,11 @@ export async function GET(req: Request) {
   // results, never grant access the index didn't already suggest.
   let chatIds: number[] = [];
   if (owner) {
-    const me = await api.getMe().catch(() => null);
-    if (me) {
+    try {
+      const me = await api.getMe();
       chatIds = await getUserAdminGroupIds(me.id);
+    } catch {
+      chatIds = await getUserAdminGroupIds(user.id);
     }
   } else {
     chatIds = await getUserAdminGroupIds(user.id);

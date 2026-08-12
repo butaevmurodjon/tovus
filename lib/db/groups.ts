@@ -45,7 +45,13 @@ export async function listAllGroupIds(): Promise<number[]> {
 
 export async function getGroupSettings(chatId: number): Promise<GroupSettings | null> {
   const data = await getRedis().get<GroupSettings>(settingsKey(chatId));
-  return data ?? null;
+  if (!data) return null;
+  // Groups registered before a schema change may be missing fields added since,
+  // and won't get backfilled until their next my_chat_member event (see
+  // registerGroup) — merge in defaults on every read so callers never see
+  // `undefined` for a setting that looks "on" in the UI (e.g. warnTtlDays
+  // turning into NaN math downstream).
+  return { ...DEFAULT_GROUP_SETTINGS, ...data };
 }
 
 export async function saveGroupSettings(settings: GroupSettings): Promise<void> {
@@ -54,28 +60,38 @@ export async function saveGroupSettings(settings: GroupSettings): Promise<void> 
 
 type SettingsPatch = Partial<Omit<GroupSettings, "chatId">>;
 
+type Cascade = (current: GroupSettings, patch: SettingsPatch) => SettingsPatch;
+
 /** Explicitly turning the manual antiraid toggle off must mean fully off —
  * `antiraidAuto` defaults true, so without this cascade a group that once
  * enabled and then disabled antiraid would silently stay protected via the
  * automatic fallback, contradicting what the toggle shows. Exported for
  * testing; not meant to be called directly outside updateGroupSettings. */
-export function applyAntiraidCascade(patch: SettingsPatch): SettingsPatch {
+export const applyAntiraidCascade: Cascade = (_current, patch) => {
   return patch.antiraidEnabled === false ? { ...patch, antiraidAuto: false } : patch;
-}
+};
 
 /** Explicitly setting the warn limit to 0 must mean escalation is fully off —
  * otherwise a stale `warnEscalationEnabled: true` from before would keep
  * comparing warn counts against a limit of 0, escalating on the very first
- * warn. Exported for testing; not meant to be called directly outside
- * updateGroupSettings. */
-export function applyWarnLimitCascade(patch: SettingsPatch): SettingsPatch {
-  return patch.warnLimit === 0 ? { ...patch, warnEscalationEnabled: false } : patch;
-}
+ * warn. Checks the *effective* limit (patch value, falling back to what's
+ * already stored) so re-enabling the toggle alone — without also resending
+ * the limit — can't resurrect an escalation that was previously killed via a
+ * `warnLimit: 0` patch. Exported for testing; not meant to be called directly
+ * outside updateGroupSettings. */
+export const applyWarnLimitCascade: Cascade = (current, patch) => {
+  const effectiveLimit = patch.warnLimit ?? current.warnLimit;
+  return effectiveLimit === 0 ? { ...patch, warnEscalationEnabled: false } : patch;
+};
+
+// New cascades just get added here — nothing else has to remember to nest
+// another call, so one can't be forgotten wiring it into updateGroupSettings.
+const CASCADES: Cascade[] = [applyAntiraidCascade, applyWarnLimitCascade];
 
 export async function updateGroupSettings(chatId: number, patch: SettingsPatch): Promise<GroupSettings | null> {
   const current = await getGroupSettings(chatId);
   if (!current) return null;
-  const cascaded = applyWarnLimitCascade(applyAntiraidCascade(patch));
+  const cascaded = CASCADES.reduce((p, cascade) => cascade(current, p), patch);
   const next: GroupSettings = { ...current, ...cascaded };
   await saveGroupSettings(next);
   return next;

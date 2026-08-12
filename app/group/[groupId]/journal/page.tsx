@@ -118,6 +118,7 @@ function JournalTab({
     restore: t("miniapp.restore"),
     restored: t("miniapp.restored"),
     reasonLabel: t("miniapp.reasonLabel"),
+    autoEscalated: t("miniapp.autoEscalatedBadge"),
   };
 
   return (

@@ -26,6 +26,16 @@ export async function applyViolation(
   const user = message.from;
   if (!user) return;
 
+  // Deleting the offending message doesn't depend on warn/escalation state,
+  // so it goes first and un-delayed by the Redis round trip below — and if
+  // it throws (a real, unexpected failure; GrammyError is the only kind
+  // suppressed), it aborts before any warn-count mutation happens, instead of
+  // after one, which would otherwise leave a warn recorded/cleared with no
+  // corresponding punishment or journal entry to show for it.
+  await api.deleteMessage(chatId, message.message_id).catch((err) => {
+    if (!(err instanceof GrammyError)) throw err;
+  });
+
   // A forced/leniency warn (new member's first message, first link) must
   // never count toward escalation — it's deliberately "benefit of the
   // doubt", not a real strike against a repeat offender.
@@ -43,14 +53,10 @@ export async function applyViolation(
     }
   }
 
-  await api.deleteMessage(chatId, message.message_id).catch((err) => {
-    if (!(err instanceof GrammyError)) throw err;
-  });
-
   const text = message.text ?? message.caption ?? "";
 
   await Promise.all([
-    logToJournal(chatId, message, user, verdict, effectiveAction, text),
+    logToJournal(chatId, message, user, verdict, effectiveAction, text, escalated),
     incrementStat(chatId, verdict.category),
     settings.logChannelId
       ? forwardToLogChannel(api, settings.logChannelId, chatId, user, verdict, effectiveAction, text).catch(() => {})
@@ -70,7 +76,8 @@ async function logToJournal(
   user: User,
   verdict: ModerationVerdict,
   action: ViolationAction,
-  text: string
+  text: string,
+  escalated: boolean
 ) {
   await addJournalEntry({
     id: randomId(),
@@ -83,6 +90,7 @@ async function logToJournal(
     category: verdict.category,
     reason: verdict.reason,
     action,
+    escalated,
     timestamp: Date.now(),
     restored: false,
   });

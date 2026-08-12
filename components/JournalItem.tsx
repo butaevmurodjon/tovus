@@ -40,6 +40,7 @@ export function JournalItem({
     restore: string;
     restored: string;
     reasonLabel: string;
+    autoEscalated: string;
   };
   onRestore: (id: string) => void;
   restoring: boolean;
@@ -50,6 +51,7 @@ export function JournalItem({
         <div className="flex gap-1.5 flex-wrap">
           <Badge variant={CATEGORY_VARIANT[entry.category]}>{labels.category[entry.category]}</Badge>
           <Badge variant={ACTION_VARIANT[entry.action]}>{labels.action[entry.action]}</Badge>
+          {entry.escalated && <Badge variant="warning">{labels.autoEscalated}</Badge>}
         </div>
         <span className="text-[11px] shrink-0" style={{ color: "var(--ink-muted)" }}>
           {formatTime(entry.timestamp)}

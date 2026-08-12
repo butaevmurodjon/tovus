@@ -13,7 +13,9 @@ import { Collapsible } from "@/components/Collapsible";
 import { haptic, hapticNotify, openInvoice } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
 import { isProActive, formatPlanDate, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
-import type { GroupSettings, ViolationAction } from "@/lib/db/types";
+import type { GroupSettings } from "@/lib/db/types";
+
+const WARN_LIMIT_PRESETS = [3, 5, 10];
 
 export default function GroupSettingsPage() {
   const { t, fetcher, lang } = useApp();
@@ -34,21 +36,13 @@ export default function GroupSettingsPage() {
 
   // Updates apply to the UI immediately (see GroupProvider.updateSettings) — no
   // blocking spinner needed here, just haptic feedback and an error toast if the
-  // background request ends up failing.
-  async function toggle(key: "profanityFilter" | "antispam" | "premium" | "casCheckEnabled", value: boolean) {
+  // background request ends up failing. Shared by every single-field setting
+  // below (toggles, the action picker, warn escalation) — they all differ only
+  // in which key/value they send.
+  async function setField<K extends keyof GroupSettings>(key: K, value: GroupSettings[K]) {
     haptic("light");
     try {
       await updateSettings({ [key]: value } as never);
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    }
-  }
-
-  async function setAction(action: ViolationAction) {
-    haptic("light");
-    try {
-      await updateSettings({ action });
     } catch {
       hapticNotify("error");
       flash(t("miniapp.errorToast"));
@@ -95,36 +89,6 @@ export default function GroupSettingsPage() {
       flash(t("miniapp.errorToast"));
     } finally {
       setSavingWelcome(false);
-    }
-  }
-
-  async function setWarnEscalation(enabled: boolean) {
-    haptic("light");
-    try {
-      await updateSettings({ warnEscalationEnabled: enabled });
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    }
-  }
-
-  async function setWarnLimit(limit: number) {
-    haptic("light");
-    try {
-      await updateSettings({ warnLimit: limit });
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    }
-  }
-
-  async function setWarnAction(action: "mute" | "ban") {
-    haptic("light");
-    try {
-      await updateSettings({ warnAction: action });
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
     }
   }
 
@@ -194,6 +158,15 @@ export default function GroupSettingsPage() {
     }, delays[attempt]);
   }
 
+  // The bot's /warnlimit command accepts any value 0-20, but the Mini App only
+  // offers the three common presets — if the group's current limit was set via
+  // the bot to something else (e.g. 7), show it as a fourth, selected option
+  // instead of leaving the control blank and silently overwriting it on the
+  // next unrelated tap.
+  const warnLimitOptions = WARN_LIMIT_PRESETS.includes(settings.warnLimit)
+    ? WARN_LIMIT_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
+    : [...WARN_LIMIT_PRESETS, settings.warnLimit].map((n) => ({ value: String(n), label: String(n) }));
+
   return (
     <div className="px-4 py-4 flex flex-col gap-3">
       {toast && (
@@ -234,22 +207,22 @@ export default function GroupSettingsPage() {
       <Card>
         <CardSection>
           <Row label={t("miniapp.filterProfanity")}>
-            <Toggle checked={settings.profanityFilter} onChange={(v) => toggle("profanityFilter", v)} />
+            <Toggle checked={settings.profanityFilter} onChange={(v) => setField("profanityFilter", v)} />
           </Row>
           <Divider />
           <Row label={t("miniapp.antispam")}>
-            <Toggle checked={settings.antispam} onChange={(v) => toggle("antispam", v)} />
+            <Toggle checked={settings.antispam} onChange={(v) => setField("antispam", v)} />
           </Row>
           <Divider />
           <Row label={t("miniapp.casCheckTitle")}>
-            <Toggle checked={settings.casCheckEnabled} onChange={(v) => toggle("casCheckEnabled", v)} />
+            <Toggle checked={settings.casCheckEnabled} onChange={(v) => setField("casCheckEnabled", v)} />
           </Row>
           <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
             {t("miniapp.casCheckHint")}
           </p>
           <Divider />
           <Row label={t("miniapp.premiumMode")}>
-            <Toggle checked={settings.premium} onChange={(v) => toggle("premium", v)} />
+            <Toggle checked={settings.premium} onChange={(v) => setField("premium", v)} />
           </Row>
           <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
             {t("miniapp.premiumHint")}
@@ -261,7 +234,7 @@ export default function GroupSettingsPage() {
         <CardSection title={t("miniapp.violationAction")}>
           <SegmentedControl
             value={settings.action}
-            onChange={setAction}
+            onChange={(action) => setField("action", action)}
             columns={2}
             options={[
               { value: "delete", label: t("miniapp.actionDelete") },
@@ -276,7 +249,10 @@ export default function GroupSettingsPage() {
       <Card>
         <CardSection>
           <Row label={t("miniapp.warnEscalationTitle")}>
-            <Toggle checked={settings.warnEscalationEnabled} onChange={setWarnEscalation} />
+            <Toggle
+              checked={settings.warnEscalationEnabled}
+              onChange={(v) => setField("warnEscalationEnabled", v)}
+            />
           </Row>
           <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
             {t("miniapp.warnEscalationHint")}
@@ -289,13 +265,9 @@ export default function GroupSettingsPage() {
                 </p>
                 <SegmentedControl
                   value={String(settings.warnLimit)}
-                  onChange={(v) => setWarnLimit(Number(v))}
-                  columns={3}
-                  options={[
-                    { value: "3", label: "3" },
-                    { value: "5", label: "5" },
-                    { value: "10", label: "10" },
-                  ]}
+                  onChange={(v) => setField("warnLimit", Number(v))}
+                  columns={WARN_LIMIT_PRESETS.includes(settings.warnLimit) ? 3 : 4}
+                  options={warnLimitOptions}
                 />
               </div>
               <div className="mt-3">
@@ -304,7 +276,7 @@ export default function GroupSettingsPage() {
                 </p>
                 <SegmentedControl
                   value={settings.warnAction}
-                  onChange={setWarnAction}
+                  onChange={(action) => setField("warnAction", action)}
                   columns={2}
                   options={[
                     { value: "mute", label: t("miniapp.actionMute") },

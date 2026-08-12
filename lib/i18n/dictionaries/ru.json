@@ -187,6 +187,7 @@
     "restored": "Восстановлено",
     "restoreConfirm": "Восстановить это сообщение и снять ограничения с пользователя?",
     "reasonLabel": "Причина",
+    "autoEscalatedBadge": "авто (эскалация)",
     "actionLabel": "Действие",
     "profile": "Профиль",
     "language": "Язык",

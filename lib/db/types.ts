@@ -84,6 +84,11 @@ export interface JournalEntry {
   category: ViolationCategory;
   reason: string;
   action: ViolationAction;
+  /** True when `action` was reached via warn escalation rather than the
+   * group's configured `action`/`warnAction` directly — lets the journal show
+   * "auto-escalated" instead of implying the admin configured this action for
+   * this category outright. */
+  escalated: boolean;
   timestamp: number;
   restored: boolean;
 }

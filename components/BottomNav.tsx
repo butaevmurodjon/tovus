@@ -16,6 +16,7 @@ export function BottomNav({ chatId }: { chatId: number }) {
 
   return (
     <nav
+      aria-label="Primary navigation"
       className="fixed bottom-0 inset-x-0 flex items-stretch"
       style={{
         background: "var(--surface)",
@@ -29,7 +30,8 @@ export function BottomNav({ chatId }: { chatId: number }) {
           <Link
             key={item.href}
             href={item.href}
-            className="flex-1 flex flex-col items-center gap-0.5 py-2.5"
+            aria-current={active ? "page" : undefined}
+            className="flex-1 flex flex-col items-center gap-0.5 py-2.5 select-none"
             style={{ color: active ? "var(--accent)" : "var(--ink-muted)" }}
           >
             <span className="text-[16px] leading-none">{item.icon}</span>

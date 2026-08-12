@@ -30,7 +30,13 @@ function GroupShell({ children }: { children: React.ReactNode }) {
 
 export default function GroupLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ groupId: string }>();
-  const chatId = Number(params.groupId);
+  const { t } = useApp();
+  const rawId = params?.groupId;
+  const chatId = rawId && /^\d+$/.test(rawId) ? Number(rawId) : NaN;
+
+  if (Number.isNaN(chatId)) {
+    return <StatusScreen title={t("miniapp.connectionError")} />;
+  }
 
   return (
     <GroupProvider chatId={chatId}>

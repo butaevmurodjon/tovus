@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/telegram/miniAppAuth";
 import { getApi } from "@/lib/telegram/api";
 import { getGroupSettings, updateGroupSettings } from "@/lib/db/groups";
-import { getBotPermissions, missingPermissionsFor } from "@/lib/telegram/adminCheck";
+import { getBotPermissions, isChatAdmin, missingPermissionsFor } from "@/lib/telegram/adminCheck";
 import { isProActive } from "@/lib/billing/plan";
 import type { GroupSettings } from "@/lib/db/types";
 

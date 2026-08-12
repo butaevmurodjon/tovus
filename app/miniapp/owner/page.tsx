@@ -12,12 +12,17 @@ export default function OwnerPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [banInput, setBanInput] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     fetch("/api/miniapp/groups")
       .then((r) => r.json())
-      .then((data) => setGroups(data.groups ?? []))
-      .catch(console.error);
+      .then((data) => {
+        setGroups(data.groups ?? []);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }, []);
 
   async function banUser(chatId: number) {
@@ -31,8 +36,8 @@ export default function OwnerPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId }),
       });
-      if (res.ok) alert("Banned");
-      else alert("Ban failed");
+      if (res.ok) alert("Бан выполнен");
+      else alert("Не удалось забанить");
     } finally {
       setBusy(null);
     }
@@ -40,9 +45,11 @@ export default function OwnerPage() {
 
   return (
     <div className="p-4 max-w-xl mx-auto">
-      <h1 className="text-xl font-bold mb-4">Owner Panel</h1>
-      {groups.length === 0 ? (
-        <p>No groups available</p>
+      <h1 className="text-xl font-bold mb-4">Панель владельца</h1>
+      {loading ? (
+        <p className="text-muted">Загрузка...</p>
+      ) : groups.length === 0 ? (
+        <p>Нет доступных групп</p>
       ) : (
         <ul className="space-y-3">
           {groups.map((g) => (

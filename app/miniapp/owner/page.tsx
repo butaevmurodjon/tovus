@@ -13,16 +13,40 @@ export default function OwnerPage() {
   const [banInput, setBanInput] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isOwner, setIsOwner] = useState(false);
+  const [checkedOwner, setCheckedOwner] = useState(false);
 
   useEffect(() => {
-    setLoading(true);
-    fetch("/api/miniapp/groups")
-      .then((r) => r.json())
-      .then((data) => {
+    let active = true;
+    async function init() {
+      try {
+        const [meRes, groupsRes] = await Promise.all([
+          fetch("/api/miniapp/me"),
+          fetch("/api/miniapp/groups"),
+        ]);
+        const me = await meRes.json();
+        if (!active) return;
+        setIsOwner(!!me.isOwner);
+        setCheckedOwner(true);
+        if (!me.isOwner) {
+          setLoading(false);
+          return;
+        }
+        const data = await groupsRes.json();
+        if (!active) return;
         setGroups(data.groups ?? []);
         setLoading(false);
-      })
-      .catch(() => setLoading(false));
+      } catch {
+        if (active) {
+          setLoading(false);
+          setCheckedOwner(true);
+        }
+      }
+    }
+    init();
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function banUser(chatId: number) {
@@ -42,6 +66,9 @@ export default function OwnerPage() {
       setBusy(null);
     }
   }
+
+  if (!checkedOwner) return <p className="text-muted">Загрузка...</p>;
+  if (!isOwner) return <p>Доступ запрещён</p>;
 
   return (
     <div className="p-4 max-w-xl mx-auto">

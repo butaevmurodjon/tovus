@@ -21,11 +21,25 @@ export async function POST(
 
   const body = await req.json().catch(() => null);
   const userId = Number(body?.userId);
-  if (!Number.isInteger(userId)) {
+  if (!Number.isInteger(userId) || userId <= 0) {
     return NextResponse.json({ error: "invalid user" }, { status: 400 });
   }
 
   const api = getApi();
+
+  // Ensure the bot is still an administrator before allowing a ban.
+  let isBotAdmin = false;
+  try {
+    const me = await api.getMe();
+    const member = await api.getChatMember(chatId, me.id);
+    isBotAdmin = member?.status === "administrator" || member?.status === "creator";
+  } catch {
+    isBotAdmin = false;
+  }
+  if (!isBotAdmin) {
+    return NextResponse.json({ error: "bot_not_admin" }, { status: 403 });
+  }
+
   try {
     await api.banChatMember(chatId, userId);
     return NextResponse.json({ ok: true });

@@ -22,7 +22,15 @@ export async function GET(req: Request) {
   // The live isChatAdmin check below stays as defense-in-depth in case the
   // index is stale (a missed chat_member update): it can only ever narrow
   // results, never grant access the index didn't already suggest.
-  const chatIds = await getUserAdminGroupIds(user.id);
+  let chatIds: number[] = [];
+  if (owner) {
+    const me = await api.getMe().catch(() => null);
+    if (me) {
+      chatIds = await getUserAdminGroupIds(me.id);
+    }
+  } else {
+    chatIds = await getUserAdminGroupIds(user.id);
+  }
 
   const results = await Promise.all(
     chatIds.map(async (chatId): Promise<AdminGroupSummary | null> => {

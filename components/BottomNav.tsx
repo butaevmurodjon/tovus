@@ -27,7 +27,7 @@ export function BottomNav({ chatId }: { chatId: number }) {
     { href: `/group/${chatId}`, label: t("miniapp.settingsTab"), icon: "⚙" },
     { href: `/group/${chatId}/stats`, label: t("miniapp.statsTab"), icon: "▤" },
     { href: `/group/${chatId}/journal`, label: t("miniapp.journalTab"), icon: "☰" },
-    ...(isOwner ? [{ href: "/owner", label: "God Mode", icon: "🛡" }] : []),
+    ...(isOwner ? [{ href: "/miniapp/owner", label: "God Mode", icon: "🛡" }] : []),
   ];
 
   return (

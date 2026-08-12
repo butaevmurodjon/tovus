@@ -6,6 +6,7 @@ import {
   DOMAIN_BLACKLIST,
   LINK_COUNT_THRESHOLD,
   MENTION_COUNT_THRESHOLD,
+  SCAM_PATTERNS,
 } from "./spamDict";
 
 export interface SpamResult {
@@ -114,6 +115,18 @@ export function detectSpam(message: Message): SpamResult {
   const text = message.text ?? message.caption ?? "";
   const entities = message.entities ?? message.caption_entities;
   if (!text) return { matched: false };
+
+  // Strong standalone scam-scheme phrases ("мошеннические схемы") — job-scam
+  // pay-for-views, fake review writing, "write to the manager" DM-bait. Clear
+  // enough to escalate at high severity with no link, forward, or mention: a
+  // plain-text job scam gets deleted (deleteMessage runs unconditionally in
+  // applyViolation) instead of slipping through because it had no URL. Kept as
+  // specific multi-word phrases — bare terms like "ищем работников" or "ставка
+  // за час" are legitimate job-ad vocabulary and must not trip this.
+  const scamPattern = SCAM_PATTERNS.find((phrase) => text.toLowerCase().includes(phrase));
+  if (scamPattern) {
+    return { matched: true, reason: `скам-схема: ${scamPattern}`, severity: "high" };
+  }
 
   const links = extractLinks(text, entities);
 

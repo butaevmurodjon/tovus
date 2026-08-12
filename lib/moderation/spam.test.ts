@@ -118,6 +118,29 @@ describe("detectSpam", () => {
     expect(result.matched).toBe(false);
   });
 
+  it("flags a pay-for-views job scam with no links or mentions (RabotaUzb-style) at high severity", () => {
+    const text = [
+      "✅ Ищем работников на онлайн биржу приложение RabotaUzb",
+      "В чем заключается работа:",
+      "- Просмотр рекламных роликов рекламодателей",
+      "- Написание отзывов на Google и Яндекс картах",
+      "- Просмотр роликов на YouTube\\TikTok наших рекламодателей",
+      "❤️ Фиксированая ставка 75.000 Сум за час, с бонусами до 100.000",
+      "🤖 Для связи пишите менеджеру (только на русском языке): @maryammanag",
+    ].join("\n");
+    const result = detectSpam(msg(text));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+    expect(result.reason).toContain("скам-схема");
+  });
+
+  it("does not flag a legitimate plain job offer with no scam-scheme phrases", () => {
+    const result = detectSpam(
+      msg("Ищем работников на склад. Опыт не нужен, фиксированная ставка за час, график 5/2.")
+    );
+    expect(result.matched).toBe(false);
+  });
+
   it("flags an .apk file even with no caption at all (regression — scam APKs are usually sent bare)", () => {
     const result = detectSpam(docMsg({ file_name: "Mobile_Bank_Update.apk" }));
     expect(result.matched).toBe(true);

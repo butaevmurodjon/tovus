@@ -60,6 +60,40 @@ export const CTA_PHRASES: string[] = [
 ];
 
 /**
+ * Strong standalone scam-scheme phrases ("мошеннические схемы"): pay-for-views
+ * job scams, fake-review writing, "write to the manager" DM-bait. Unlike
+ * CTA_PHRASES these escalate at HIGH severity on their own — no link, forward,
+ * or mention required — so a plain-text job scam is deleted immediately instead
+ * of slipping through because it had no URL. Kept deliberately specific: bare
+ * job-ad vocabulary ("ищем работников", "ставка за час") is legitimate and
+ * must NOT be here. Extend freely with multi-word phrases, ru + uz-cyrl.
+ */
+export const SCAM_PATTERNS: string[] = [
+  // «Работа за просмотр роликов / за отзывы» — classic earnings-scam pitch.
+  "просмотр рекламных роликов",
+  "просмотр роликов на youtube",
+  "просмотр роликов на тикток",
+  "написание отзывов на google",
+  "написание отзывов на яндекс",
+  "отзывы на google и яндекс",
+  "отзывы на гугл и яндекс",
+  "заработок на просмотре роликов",
+  "заработок на просмотре видео",
+  "заработок на лайках",
+  "заработок за подписки",
+  "лайки за деньги",
+  "подписки за деньги",
+  "для связи пишите менеджеру",
+  "пишите менеджеру в лс",
+  "пишите менеджеру в личку",
+  // uz-cyrl variants.
+  "роликлар кўриш орқали пул топиш",
+  "реклама роликларини кўриш",
+  "шарҳ ёзиб пул топиш",
+  "яндекс харитага шарҳ ёзиш",
+];
+
+/**
  * File extensions almost never legitimate in a public/business group chat and
  * heavily used for malware/spyware distribution in the region — fake "official
  * bank/gov app" .apk installers are the single most common scam-file vector here.

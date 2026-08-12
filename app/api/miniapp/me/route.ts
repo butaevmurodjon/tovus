@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/telegram/miniAppAuth";
 import { getUserLang, setUserLang } from "@/lib/db/userLang";
 import { detectLang, isLang } from "@/lib/i18n";
+import { isOwner } from "@/lib/owner";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,8 @@ export async function GET(req: Request) {
   const lang = storedLang ?? detectLang(user.language_code);
   if (!storedLang) await setUserLang(user.id, lang);
 
-  return NextResponse.json({ user, lang });
+  const owner = isOwner(user.id);
+  return NextResponse.json({ user, lang, isOwner: owner });
 }
 
 export async function PATCH(req: Request) {

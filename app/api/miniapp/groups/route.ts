@@ -6,6 +6,7 @@ import { getGroupSettings } from "@/lib/db/groups";
 import { getUserAdminGroupIds } from "@/lib/db/admins";
 import { isProActive } from "@/lib/billing/plan";
 import type { AdminGroupSummary } from "@/lib/db/types";
+import { isOwner } from "@/lib/owner";
 
 export const runtime = "nodejs";
 
@@ -13,6 +14,7 @@ export async function GET(req: Request) {
   const user = authenticateRequest(req);
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  const owner = isOwner(user.id);
   const api = getApi();
   // Reverse index instead of scanning every group the bot has ever joined —
   // this used to be O(all groups the bot is in), doing a live getChatMember
@@ -25,7 +27,7 @@ export async function GET(req: Request) {
   const results = await Promise.all(
     chatIds.map(async (chatId): Promise<AdminGroupSummary | null> => {
       try {
-        const admin = await isChatAdmin(api, chatId, user.id).catch(() => false);
+        const admin = owner ? true : await isChatAdmin(api, chatId, user.id).catch(() => false);
         if (!admin) return null;
         const [settings, botPermissions] = await Promise.all([getGroupSettings(chatId), getBotPermissions(api, chatId)]);
         if (!settings) return null;

@@ -1,17 +1,33 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useApp } from "@/contexts/AppProvider";
 
 export function BottomNav({ chatId }: { chatId: number }) {
   const pathname = usePathname();
   const { t } = useApp();
+  const [isOwner, setIsOwner] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch("/api/miniapp/me")
+      .then((r) => r.json())
+      .then((data) => {
+        if (mounted) setIsOwner(!!data.isOwner);
+      })
+      .catch(() => {});
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const items = [
     { href: `/group/${chatId}`, label: t("miniapp.settingsTab"), icon: "⚙" },
     { href: `/group/${chatId}/stats`, label: t("miniapp.statsTab"), icon: "▤" },
     { href: `/group/${chatId}/journal`, label: t("miniapp.journalTab"), icon: "☰" },
+    ...(isOwner ? [{ href: "/owner", label: "God Mode", icon: "🛡" }] : []),
   ];
 
   return (

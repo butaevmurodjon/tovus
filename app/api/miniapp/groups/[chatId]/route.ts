@@ -10,12 +10,13 @@ export const runtime = "nodejs";
 
 export async function GET(
   req: Request,
-  { params }: { params: { chatId: string } }
+  { params }: { params: Promise<{ chatId: string }> }
 ) {
+  const { chatId: rawChatId } = await params;
   const user = authenticateRequest(req);
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const chatId = Number(params.chatId);
+  const chatId = Number(rawChatId);
   if (!Number.isFinite(chatId)) {
     return NextResponse.json({ error: "invalid_chat_id" }, { status: 400 });
   }
@@ -46,12 +47,13 @@ export async function GET(
 
 export async function PATCH(
   req: Request,
-  { params }: { params: { chatId: string } }
+  { params }: { params: Promise<{ chatId: string }> }
 ) {
+  const { chatId: rawChatId } = await params;
   const user = authenticateRequest(req);
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const chatId = Number(params.chatId);
+  const chatId = Number(rawChatId);
   if (!Number.isFinite(chatId)) {
     return NextResponse.json({ error: "invalid_chat_id" }, { status: 400 });
   }

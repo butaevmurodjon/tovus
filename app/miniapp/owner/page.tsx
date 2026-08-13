@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useApp } from "@/contexts/AppProvider";
 
 interface Group {
   chatId: number;
@@ -9,6 +10,7 @@ interface Group {
 }
 
 export default function OwnerPage() {
+  const { fetcher, status } = useApp();
   const [groups, setGroups] = useState<Group[]>([]);
   const [banInput, setBanInput] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<number | null>(null);
@@ -19,12 +21,12 @@ export default function OwnerPage() {
   useEffect(() => {
     let active = true;
     async function init() {
+      if (status !== "ready") return;
       try {
-        const [meRes, groupsRes] = await Promise.all([
-          fetch("/api/miniapp/me"),
-          fetch("/api/miniapp/groups"),
+        const [me, groupsData] = await Promise.all([
+          fetcher<{ isOwner: boolean }>("/api/miniapp/me"),
+          fetcher<{ groups: Group[] }>("/api/miniapp/groups"),
         ]);
-        const me = await meRes.json();
         if (!active) return;
         setIsOwner(!!me.isOwner);
         setCheckedOwner(true);
@@ -32,15 +34,7 @@ export default function OwnerPage() {
           setLoading(false);
           return;
         }
-        if (!groupsRes.ok) {
-          const errData = await groupsRes.json().catch(() => null);
-          console.error("Failed to load groups:", errData);
-          setLoading(false);
-          return;
-        }
-        const data = await groupsRes.json();
-        if (!active) return;
-        setGroups(data.groups ?? []);
+        setGroups(groupsData.groups ?? []);
         setLoading(false);
       } catch (err) {
         console.error("Failed to load owner data:", err);
@@ -54,7 +48,7 @@ export default function OwnerPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [fetcher, status]);
 
   async function banUser(chatId: number) {
     const raw = (banInput[chatId] ?? "").trim();
@@ -62,19 +56,20 @@ export default function OwnerPage() {
     if (!userId) return;
     setBusy(chatId);
     try {
-      const res = await fetch(`/api/miniapp/owner/groups/${chatId}/ban`, {
+      await fetcher(`/api/miniapp/owner/groups/${chatId}/ban`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userId }),
       });
-      if (res.ok) alert("Бан выполнен");
-      else alert("Не удалось забанить");
+      alert("Бан выполнен");
+    } catch (err) {
+      console.error("Failed to ban user:", err);
+      alert("Не удалось забанить");
     } finally {
       setBusy(null);
     }
   }
 
-  if (!checkedOwner) return <p className="text-muted">Загрузка...</p>;
+  if (status === "loading" || !checkedOwner) return <p className="text-muted">Загрузка...</p>;
   if (!isOwner) return <p>Доступ запрещён</p>;
 
   return (

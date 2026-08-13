@@ -32,7 +32,10 @@ export default function GroupLayout({ children }: { children: React.ReactNode })
   const params = useParams<{ groupId: string }>();
   const { t } = useApp();
   const rawId = params?.groupId;
-  const chatId = rawId && /^\d+$/.test(rawId) ? Number(rawId) : NaN;
+  // Telegram group and supergroup IDs are negative (for example,
+  // -1001234567890). Rejecting the leading minus made every normal group open
+  // as a misleading "check your connection" failure.
+  const chatId = rawId && /^-?\d+$/.test(rawId) ? Number(rawId) : NaN;
 
   if (Number.isNaN(chatId)) {
     return <StatusScreen title={t("miniapp.connectionError")} />;

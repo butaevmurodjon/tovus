@@ -43,6 +43,13 @@ export async function listAllGroupIds(): Promise<number[]> {
   return (ids ?? []).map((id) => Number(id));
 }
 
+/** True only while the bot is registered as present in this chat.  This is
+ * intentionally separate from settings existence: settings are retained after
+ * the bot leaves so they can be restored if it is added back later. */
+export async function isRegisteredGroup(chatId: number): Promise<boolean> {
+  return (await getRedis().sismember(allGroupsKey, chatId)) === 1;
+}
+
 export async function getGroupSettings(chatId: number): Promise<GroupSettings | null> {
   const data = await getRedis().get<GroupSettings>(settingsKey(chatId));
   if (!data) return null;

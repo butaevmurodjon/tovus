@@ -7,13 +7,13 @@ import { useApp } from "@/contexts/AppProvider";
 
 export function BottomNav({ chatId }: { chatId: number }) {
   const pathname = usePathname();
-  const { t } = useApp();
+  const { t, fetcher, status } = useApp();
   const [isOwner, setIsOwner] = useState(false);
 
   useEffect(() => {
+    if (status !== "ready") return;
     let mounted = true;
-    fetch("/api/miniapp/me")
-      .then((r) => r.json())
+    fetcher<{ isOwner: boolean }>("/api/miniapp/me")
       .then((data) => {
         if (mounted) setIsOwner(!!data.isOwner);
       })
@@ -21,7 +21,7 @@ export function BottomNav({ chatId }: { chatId: number }) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [fetcher, status]);
 
   const items = [
     { href: `/group/${chatId}`, label: t("miniapp.settingsTab"), icon: "⚙" },

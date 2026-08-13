@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { authenticateRequest } from "@/lib/telegram/miniAppAuth";
+import { authorizeGroupAdmin } from "@/lib/telegram/miniAppAuth";
 import { getApi } from "@/lib/telegram/api";
 import { getGroupSettings, updateGroupSettings } from "@/lib/db/groups";
-import { getBotPermissions, isChatAdmin, missingPermissionsFor } from "@/lib/telegram/adminCheck";
+import { getBotPermissions, missingPermissionsFor } from "@/lib/telegram/adminCheck";
 import { isProActive } from "@/lib/billing/plan";
 import type { GroupSettings } from "@/lib/db/types";
 
@@ -13,22 +13,18 @@ export async function GET(
   { params }: { params: Promise<{ groupId: string }> }
 ) {
   const { groupId: rawGroupId } = await params;
-  const user = authenticateRequest(req);
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-
   const chatId = Number(rawGroupId);
   if (!Number.isFinite(chatId)) {
     return NextResponse.json({ error: "invalid_chat_id" }, { status: 400 });
   }
 
-  const api = getApi();
-  const isAdmin = await isChatAdmin(api, chatId, user.id).catch(() => false);
-  if (!isAdmin) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const auth = await authorizeGroupAdmin(req, chatId);
+  if (!auth.ok) return NextResponse.json({ error: "forbidden" }, { status: auth.status });
 
   const settings = await getGroupSettings(chatId);
   if (!settings) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const botPermissions = await getBotPermissions(api, chatId);
+  const botPermissions = await getBotPermissions(getApi(), chatId);
   const permCtx = {
     action: settings.action,
     captchaEnabled: settings.captchaEnabled,
@@ -50,17 +46,13 @@ export async function PATCH(
   { params }: { params: Promise<{ groupId: string }> }
 ) {
   const { groupId: rawGroupId } = await params;
-  const user = authenticateRequest(req);
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-
   const chatId = Number(rawGroupId);
   if (!Number.isFinite(chatId)) {
     return NextResponse.json({ error: "invalid_chat_id" }, { status: 400 });
   }
 
-  const api = getApi();
-  const isAdmin = await isChatAdmin(api, chatId, user.id).catch(() => false);
-  if (!isAdmin) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  const auth = await authorizeGroupAdmin(req, chatId);
+  if (!auth.ok) return NextResponse.json({ error: "forbidden" }, { status: auth.status });
 
   const patch = (await req.json().catch(() => ({}))) as Partial<GroupSettings>;
 

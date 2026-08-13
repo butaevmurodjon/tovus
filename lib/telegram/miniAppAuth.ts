@@ -4,10 +4,21 @@ import { isChatAdmin } from "./adminCheck";
 
 export function authenticateRequest(req: Request): TelegramWebAppUser | null {
   const token = process.env.TELEGRAM_BOT_TOKEN;
-  if (!token) return null;
+  if (!token) {
+    console.error("BOT_TOKEN not set");
+    return null;
+  }
   const raw = extractInitData(req);
-  if (!raw) return null;
-  return verifyInitData(raw, token)?.user ?? null;
+  if (!raw) {
+    console.error("No initData found");
+    return null;
+  }
+  const verified = verifyInitData(raw, token);
+  if (!verified) {
+    console.error("initData verification failed");
+    return null;
+  }
+  return verified.user;
 }
 
 export type GroupAuthResult =

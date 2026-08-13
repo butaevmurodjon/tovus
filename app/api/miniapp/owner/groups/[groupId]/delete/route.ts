@@ -6,36 +6,30 @@ import { authorizeOwnerAction, ownerActionErrorStatus } from "@/lib/telegram/own
 
 export const runtime = "nodejs";
 
-export async function POST(
-  req: Request,
-  { params }: { params: Promise<{ groupId: string }> }
-) {
+export async function POST(req: Request, { params }: { params: Promise<{ groupId: string }> }) {
   const user = authenticateRequest(req);
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   if (!isOwner(user.id)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
   const { groupId } = await params;
   const chatId = Number(groupId);
-  if (!Number.isInteger(chatId)) {
-    return NextResponse.json({ error: "invalid group" }, { status: 400 });
-  }
+  if (!Number.isInteger(chatId)) return NextResponse.json({ error: "invalid_group" }, { status: 400 });
 
   const body = await req.json().catch(() => null);
-  const userId = Number(body?.userId);
-  if (!Number.isInteger(userId) || userId <= 0) {
-    return NextResponse.json({ error: "invalid user" }, { status: 400 });
+  const messageId = Number(body?.messageId);
+  if (!Number.isInteger(messageId) || messageId <= 0) {
+    return NextResponse.json({ error: "invalid_message_id" }, { status: 400 });
   }
 
   const api = getApi();
-
-  const access = await authorizeOwnerAction(api, chatId, "ban");
+  const access = await authorizeOwnerAction(api, chatId, "delete");
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: 403 });
 
   try {
-    await api.banChatMember(chatId, userId);
+    await api.deleteMessage(chatId, messageId);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("Manual owner ban failed:", err);
-    return NextResponse.json({ error: "ban_failed" }, { status: ownerActionErrorStatus(err) });
+    console.error("Manual owner delete failed:", err);
+    return NextResponse.json({ error: "delete_failed" }, { status: ownerActionErrorStatus(err) });
   }
 }

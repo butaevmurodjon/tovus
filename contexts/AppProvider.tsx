@@ -10,6 +10,7 @@ type Status = "loading" | "ready" | "no-telegram" | "error";
 interface AppContextValue {
   status: Status;
   user: TelegramWebAppUser | null;
+  isOwner: boolean;
   lang: Lang;
   setLang: (lang: Lang) => void;
   t: (key: string, params?: Record<string, string | number>) => string;
@@ -22,6 +23,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const { initData, inTelegram, bootstrapped } = useTelegramWebApp();
   const [status, setStatus] = useState<Status>("loading");
   const [user, setUser] = useState<TelegramWebAppUser | null>(null);
+  const [isOwner, setIsOwner] = useState(false);
   const [lang, setLangState] = useState<Lang>(DEFAULT_LANG);
 
   const fetcher = useMemo(() => createFetcher(initData), [initData]);
@@ -34,10 +36,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     let cancelled = false;
-    fetcher<{ user: TelegramWebAppUser; lang: Lang }>("/api/miniapp/me")
+    fetcher<{ user: TelegramWebAppUser; lang: Lang; isOwner: boolean }>("/api/miniapp/me")
       .then((data) => {
         if (cancelled) return;
         setUser(data.user);
+        setIsOwner(data.isOwner);
         setLangState(data.lang);
         setStatus("ready");
       })
@@ -62,7 +65,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [lang]
   );
 
-  const value: AppContextValue = { status, user, lang, setLang, t, fetcher };
+  const value: AppContextValue = { status, user, isOwner, lang, setLang, t, fetcher };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

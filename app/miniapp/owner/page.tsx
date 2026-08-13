@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useApp } from "@/contexts/AppProvider";
 
@@ -10,27 +11,18 @@ interface Group {
 }
 
 export default function OwnerPage() {
-  const { fetcher, status } = useApp();
+  const { fetcher, status, isOwner } = useApp();
   const [groups, setGroups] = useState<Group[]>([]);
-  const [banInput, setBanInput] = useState<Record<number, string>>({});
-  const [busy, setBusy] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isOwner, setIsOwner] = useState(false);
-  const [checkedOwner, setCheckedOwner] = useState(false);
 
   useEffect(() => {
     let active = true;
     async function init() {
       if (status !== "ready") return;
       try {
-        const [me, groupsData] = await Promise.all([
-          fetcher<{ isOwner: boolean }>("/api/miniapp/me"),
-          fetcher<{ groups: Group[] }>("/api/miniapp/groups"),
-        ]);
+        const groupsData = await fetcher<{ groups: Group[] }>("/api/miniapp/groups");
         if (!active) return;
-        setIsOwner(!!me.isOwner);
-        setCheckedOwner(true);
-        if (!me.isOwner) {
+        if (!isOwner) {
           setLoading(false);
           return;
         }
@@ -40,7 +32,6 @@ export default function OwnerPage() {
         console.error("Failed to load owner data:", err);
         if (active) {
           setLoading(false);
-          setCheckedOwner(true);
         }
       }
     }
@@ -48,33 +39,15 @@ export default function OwnerPage() {
     return () => {
       active = false;
     };
-  }, [fetcher, status]);
+  }, [fetcher, isOwner, status]);
 
-  async function banUser(chatId: number) {
-    const raw = (banInput[chatId] ?? "").trim();
-    const userId = Number(raw);
-    if (!userId) return;
-    setBusy(chatId);
-    try {
-      await fetcher(`/api/miniapp/owner/groups/${chatId}/ban`, {
-        method: "POST",
-        body: JSON.stringify({ userId }),
-      });
-      alert("Бан выполнен");
-    } catch (err) {
-      console.error("Failed to ban user:", err);
-      alert("Не удалось забанить");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  if (status === "loading" || !checkedOwner) return <p className="text-muted">Загрузка...</p>;
+  if (status === "loading") return <p className="text-muted">Загрузка...</p>;
   if (!isOwner) return <p>Доступ запрещён</p>;
 
   return (
     <div className="p-4 max-w-xl mx-auto">
-      <h1 className="text-xl font-bold mb-4">Панель владельца</h1>
+      <h1 className="text-xl font-bold mb-2">Группы бота</h1>
+      <p className="text-sm mb-4 text-muted">Откройте группу, затем вкладку «Управление» для ручных действий.</p>
       {loading ? (
         <p className="text-muted">Загрузка...</p>
       ) : groups.length === 0 ? (
@@ -85,24 +58,9 @@ export default function OwnerPage() {
             <li key={g.chatId} className="border rounded p-3">
               <div className="font-medium">{g.title}</div>
               <div className="text-xs text-muted">ID: {g.chatId}</div>
-              <div className="flex gap-2 mt-2">
-                <input
-                  type="number"
-                  placeholder="User ID"
-                  value={banInput[g.chatId] ?? ""}
-                  onChange={(e) =>
-                    setBanInput((prev) => ({ ...prev, [g.chatId]: e.target.value }))
-                  }
-                  className="border px-2 py-1 rounded w-32"
-                />
-                <button
-                  onClick={() => banUser(g.chatId)}
-                  disabled={busy === g.chatId}
-                  className="px-3 py-1 bg-red-500 text-white rounded"
-                >
-                  Ban
-                </button>
-              </div>
+              <Link href={`/group/${g.chatId}/owner`} className="inline-block mt-2 text-sm font-medium" style={{ color: "var(--accent)" }}>
+                Открыть управление
+              </Link>
             </li>
           ))}
         </ul>

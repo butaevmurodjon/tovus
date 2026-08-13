@@ -32,11 +32,18 @@ export default function OwnerPage() {
           setLoading(false);
           return;
         }
+        if (!groupsRes.ok) {
+          const errData = await groupsRes.json().catch(() => null);
+          console.error("Failed to load groups:", errData);
+          setLoading(false);
+          return;
+        }
         const data = await groupsRes.json();
         if (!active) return;
         setGroups(data.groups ?? []);
         setLoading(false);
-      } catch {
+      } catch (err) {
+        console.error("Failed to load owner data:", err);
         if (active) {
           setLoading(false);
           setCheckedOwner(true);

@@ -32,6 +32,8 @@ export function JournalItem({
   labels,
   onRestore,
   restoring,
+  onBan,
+  banning,
 }: {
   entry: JournalEntry;
   labels: {
@@ -41,9 +43,13 @@ export function JournalItem({
     restored: string;
     reasonLabel: string;
     autoEscalated: string;
+    ban?: string;
   };
   onRestore: (id: string) => void;
   restoring: boolean;
+  /** Owner-only: bans this entry's user across every group the bot manages. Omitted for non-owners. */
+  onBan?: (entry: JournalEntry) => void;
+  banning?: boolean;
 }) {
   return (
     <Card className="p-3.5">
@@ -70,13 +76,20 @@ export function JournalItem({
         {labels.reasonLabel}: {entry.reason}
       </p>
 
-      {entry.restored ? (
-        <Badge variant="good">{labels.restored}</Badge>
-      ) : (
-        <Button variant="secondary" onClick={() => onRestore(entry.id)} disabled={restoring}>
-          {labels.restore}
-        </Button>
-      )}
+      <div className="flex flex-wrap gap-2">
+        {entry.restored ? (
+          <Badge variant="good">{labels.restored}</Badge>
+        ) : (
+          <Button variant="secondary" onClick={() => onRestore(entry.id)} disabled={restoring}>
+            {labels.restore}
+          </Button>
+        )}
+        {onBan && labels.ban && (
+          <Button variant="danger" onClick={() => onBan(entry)} disabled={banning}>
+            {labels.ban}
+          </Button>
+        )}
+      </div>
     </Card>
   );
 }

@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useApp } from "@/contexts/AppProvider";
 import { TopBar } from "@/components/TopBar";
 import { StatusScreen } from "@/components/StatusScreen";
 import { GroupCard } from "@/components/GroupCard";
+import { Card } from "@/components/Card";
 import type { AdminGroupSummary } from "@/lib/db/types";
 
 export default function DashboardPage() {
-  const { status, t, fetcher } = useApp();
+  const { status, t, fetcher, isOwner } = useApp();
   const [groups, setGroups] = useState<AdminGroupSummary[] | null>(null);
   const [error, setError] = useState(false);
 
@@ -45,6 +47,25 @@ export default function DashboardPage() {
         <p className="text-[13px] mb-4" style={{ color: "var(--ink-muted)" }}>
           {t("miniapp.dashboardSubtitle")}
         </p>
+
+        {isOwner && (
+          <Link href="/owner" className="block mb-3">
+            <Card className="p-3.5 flex items-center justify-between gap-3 active:opacity-70 transition-opacity">
+              <div className="flex items-center gap-2.5">
+                <span className="text-[20px] leading-none">🛡</span>
+                <div>
+                  <p className="text-[14px] font-semibold" style={{ color: "var(--ink)" }}>
+                    {t("miniapp.ownerTitle")}
+                  </p>
+                  <p className="text-[12px]" style={{ color: "var(--ink-muted)" }}>
+                    {t("miniapp.ownerEntryHint")}
+                  </p>
+                </div>
+              </div>
+              <span style={{ color: "var(--accent)" }}>›</span>
+            </Card>
+          </Link>
+        )}
 
         {groups === null && <StatusScreen title={t("common.loading")} />}
 

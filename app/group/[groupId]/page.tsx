@@ -17,8 +17,17 @@ import type { GroupSettings } from "@/lib/db/types";
 
 const WARN_LIMIT_PRESETS = [3, 5, 10];
 
+const PRO_GRANT_DAYS = [30, 90, 365];
+
+/** Module scope (not the component body) so the current-time read here isn't
+ * flagged as an impure render call — this only ever runs from a click handler. */
+function extendExpiry(currentExpiresAt: number | null, active: boolean, days: number): number {
+  const base = active && currentExpiresAt ? currentExpiresAt : Date.now();
+  return base + days * 24 * 60 * 60 * 1000;
+}
+
 export default function GroupSettingsPage() {
-  const { t, fetcher, lang } = useApp();
+  const { t, fetcher, lang, isOwner } = useApp();
   const { settings, missingPermissions, proFeaturesEligible, updateSettings, chatId, refresh } = useGroup();
   const [toast, setToast] = useState<string | null>(null);
   const [logChannelInput, setLogChannelInput] = useState(settings?.logChannelId?.toString() ?? "");
@@ -115,6 +124,34 @@ export default function GroupSettingsPage() {
     }
   }
 
+  // Owner-only manual PRO override — bypasses payment entirely, unlike
+  // toggleProFeature above which only flips already-purchased entitlements.
+  async function grantPro(days: number) {
+    if (!settings) return;
+    haptic("medium");
+    const planExpiresAt = extendExpiry(settings.planExpiresAt, isProActive(settings), days);
+    try {
+      await updateSettings({ plan: "pro", planExpiresAt });
+      hapticNotify("success");
+      flash(t("miniapp.savedToast"));
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
+  }
+
+  async function revokePro() {
+    haptic("medium");
+    try {
+      await updateSettings({ plan: "free", planExpiresAt: null });
+      hapticNotify("success");
+      flash(t("miniapp.savedToast"));
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
+  }
+
   async function handleUpgrade() {
     haptic("light");
     setUpgrading(true);
@@ -204,6 +241,25 @@ export default function GroupSettingsPage() {
         </CardSection>
       </Card>
 
+      {isOwner && (
+        <Card>
+          <CardSection title={t("miniapp.ownerProControlTitle")} subtitle={t("miniapp.ownerProControlHint")}>
+            <div className="flex flex-wrap gap-2">
+              {PRO_GRANT_DAYS.map((days) => (
+                <Button key={days} variant="secondary" onClick={() => grantPro(days)}>
+                  {t("miniapp.ownerGrantProDays", { days })}
+                </Button>
+              ))}
+              {isProActive(settings) && (
+                <Button variant="danger" onClick={revokePro}>
+                  {t("miniapp.ownerRevokePro")}
+                </Button>
+              )}
+            </div>
+          </CardSection>
+        </Card>
+      )}
+
       <Card>
         <CardSection>
           <Row label={t("miniapp.filterProfanity")}>
@@ -219,6 +275,16 @@ export default function GroupSettingsPage() {
           </Row>
           <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
             {t("miniapp.casCheckHint")}
+          </p>
+          <Divider />
+          <Row label={t("miniapp.deleteServiceMessagesTitle")}>
+            <Toggle
+              checked={settings.deleteServiceMessages}
+              onChange={(v) => setField("deleteServiceMessages", v)}
+            />
+          </Row>
+          <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
+            {t("miniapp.deleteServiceMessagesHint")}
           </p>
           <Divider />
           <Row label={t("miniapp.premiumMode")}>

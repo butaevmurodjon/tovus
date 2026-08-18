@@ -3,6 +3,7 @@ import { getGroupSettings, isWhitelisted, registerGroup, unregisterGroup } from 
 import { clearGroupAdmins, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
 import { incrementActivity, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
+import { isGloballyBanned } from "@/lib/db/globalBan";
 import { canUseProFeature, formatPlanDate } from "@/lib/billing/plan";
 import { moderateMessage } from "@/lib/moderation";
 import { checkRaid, markNewMember } from "@/lib/moderation/flood";
@@ -155,6 +156,9 @@ export function getBot(): Bot {
     const settings = await getGroupSettings(chat.id);
 
     if (message.new_chat_members?.length) {
+      if (settings?.deleteServiceMessages ?? true) {
+        await ctx.api.deleteMessage(chat.id, message.message_id).catch(() => {});
+      }
       const newMembers = message.new_chat_members.filter((member) => !member.is_bot);
       await Promise.all(newMembers.map((member) => markNewMember(chat.id, member.id)));
       if (settings) {
@@ -162,6 +166,16 @@ export function getBot(): Bot {
         const eligible = canUseProFeature(settings, memberCount);
         await Promise.all(
           newMembers.map(async (member) => {
+            // Owner-issued global ban, checked before anything else (even CAS):
+            // an admin explicitly blacklisted this account bot-wide, which
+            // outranks every per-group toggle. Not gated by any setting — it's
+            // never opt-out for a group the bot manages.
+            if (await isGloballyBanned(member.id)) {
+              const banned = await ctx.api.banChatMember(chat.id, member.id).catch(() => false);
+              if (banned) await incrementStat(chat.id, "spam").catch(() => {});
+              return;
+            }
+
             // CAS: a free, shared database of known spam/scam accounts, checked
             // before anything else — catches professional spam bots on join,
             // before they ever post a message our content filters could inspect.
@@ -194,6 +208,13 @@ export function getBot(): Bot {
             }
           })
         );
+      }
+      return;
+    }
+
+    if (message.left_chat_member) {
+      if (settings?.deleteServiceMessages ?? true) {
+        await ctx.api.deleteMessage(chat.id, message.message_id).catch(() => {});
       }
       return;
     }

@@ -47,6 +47,9 @@ export interface GroupSettings {
   welcomeEnabled: boolean;
   /** May contain the literal placeholder "{user}", substituted with an HTML mention on send. */
   welcomeMessage: string | null;
+  /** Deletes Telegram's own "X joined/added/left the group" service messages.
+   * On by default — purely cosmetic chat cleanup, no moderation tradeoff. */
+  deleteServiceMessages: boolean;
   plan: PlanTier;
   /** Unix ms. Null unless a Stars subscription has ever been active for this group. */
   planExpiresAt: number | null;
@@ -69,6 +72,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   warnTtlDays: 7,
   welcomeEnabled: false,
   welcomeMessage: null,
+  deleteServiceMessages: true,
   plan: "free",
   planExpiresAt: null,
 };
@@ -109,4 +113,25 @@ export interface AdminGroupSummary {
   hasPermissionIssue: boolean;
   plan: PlanTier;
   isPro: boolean;
+}
+
+/** A bot-owner-issued ban that applies across every group the bot manages,
+ * not just one — see lib/telegram/globalBan.ts. */
+export interface GlobalBanEntry {
+  userId: number;
+  reason: string;
+  bannedAt: number;
+  bannedBy: number;
+}
+
+/** One row of the bot-owner's cross-group overview (app/owner). */
+export interface OwnerGroupSummary {
+  chatId: number;
+  title: string;
+  plan: PlanTier;
+  isPro: boolean;
+  planExpiresAt: number | null;
+  violationsToday: number;
+  joinsToday: number;
+  createdAt: number;
 }

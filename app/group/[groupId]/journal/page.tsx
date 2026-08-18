@@ -26,7 +26,7 @@ type Tab = "journal" | "whitelist" | "words";
 type T = (key: string, params?: Record<string, string | number>) => string;
 
 export default function GroupJournalPage() {
-  const { t, fetcher } = useApp();
+  const { t, fetcher, isOwner } = useApp();
   const [tab, setTab] = useState<Tab>("journal");
   const [toast, setToast] = useState<string | null>(null);
 
@@ -55,7 +55,7 @@ export default function GroupJournalPage() {
           { value: "words", label: t("miniapp.tabWordFilter") },
         ]}
       />
-      {tab === "journal" && <JournalTab t={t} fetcher={fetcher} />}
+      {tab === "journal" && <JournalTab t={t} fetcher={fetcher} isOwner={isOwner} flash={flash} />}
       {tab === "whitelist" && <WhitelistTab t={t} flash={flash} />}
       {tab === "words" && <WordFilterTab t={t} flash={flash} />}
     </div>
@@ -65,14 +65,19 @@ export default function GroupJournalPage() {
 function JournalTab({
   t,
   fetcher,
+  isOwner,
+  flash,
 }: {
   t: T;
   fetcher: <R>(path: string, options?: RequestInit) => Promise<R>;
+  isOwner: boolean;
+  flash: (message: string) => void;
 }) {
   const { chatId } = useGroup();
   const [entries, setEntries] = useState<JournalEntry[] | null>(null);
   const [error, setError] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  const [banningId, setBanningId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,6 +105,27 @@ function JournalTab({
     }
   }
 
+  async function ban(entry: JournalEntry) {
+    const confirmed = await confirmAction(t("miniapp.ownerBanConfirm", { id: entry.userId }));
+    if (!confirmed) return;
+
+    haptic("medium");
+    setBanningId(entry.id);
+    try {
+      await fetcher(`/api/miniapp/owner/groups/${chatId}/ban`, {
+        method: "POST",
+        body: JSON.stringify({ userId: entry.userId }),
+      });
+      hapticNotify("success");
+      flash(t("miniapp.ownerBannedFromGroup"));
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    } finally {
+      setBanningId(null);
+    }
+  }
+
   if (error) return <StatusScreen title={t("miniapp.connectionError")} />;
   if (!entries) return <StatusScreen title={t("common.loading")} />;
 
@@ -119,6 +145,7 @@ function JournalTab({
     restored: t("miniapp.restored"),
     reasonLabel: t("miniapp.reasonLabel"),
     autoEscalated: t("miniapp.autoEscalatedBadge"),
+    ban: t("miniapp.ownerBanUser"),
   };
 
   return (
@@ -135,6 +162,8 @@ function JournalTab({
           labels={labels}
           onRestore={restore}
           restoring={restoringId === entry.id}
+          onBan={isOwner ? ban : undefined}
+          banning={banningId === entry.id}
         />
       ))}
     </div>

@@ -16,6 +16,7 @@ import { formatPermissionWarning, isChatAdmin } from "./adminCheck";
 import { registerCommands } from "./commands";
 import { applyViolation } from "./violations";
 import { startCaptcha, sweepExpiredCaptchas, verifyCaptcha } from "./captcha";
+import { castVote, clearVoteBan, getVoteBanMessageId, liftSanction } from "./voteban";
 import { sendWelcomeMessage } from "./welcome";
 import { activateProPlan, parseProPayload } from "./payments";
 import { displayName } from "./format";
@@ -151,6 +152,71 @@ export function getBot(): Bot {
     if (result === "wrong-answer") {
       await ctx.answerCallbackQuery({ text: t(lang, "bot.captchaWrongAnswer"), show_alert: true });
       return;
+    }
+    await ctx.answerCallbackQuery();
+  });
+
+  // Vote-ban (§15.4): the chat_id is encoded in callback_data mainly for
+  // traceability — the actual operations always use ctx.chat.id, and a
+  // mismatch (shouldn't happen; Telegram callbacks always originate from the
+  // chat the message lives in) is treated as a no-op rather than trusted.
+  bot.callbackQuery(/^vb:(-?\d+):(\d+)$/, async (ctx) => {
+    const chat = ctx.chat;
+    if (!chat) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, encodedChatIdStr, targetIdStr] = ctx.match;
+    if (Number(encodedChatIdStr) !== chat.id) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const targetUserId = Number(targetIdStr);
+    const settings = await getGroupSettings(chat.id);
+    const lang = settings?.lang ?? detectLang(ctx.callbackQuery.from.language_code);
+    const threshold = settings?.voteBanThreshold ?? 3;
+
+    const { outcome, count } = await castVote(chat.id, targetUserId, ctx.callbackQuery.from.id);
+
+    if (outcome === "self-vote") {
+      await ctx.answerCallbackQuery({ text: t(lang, "bot.voteBanSelfVote"), show_alert: true });
+      return;
+    }
+    if (outcome === "no-active-voteban") {
+      await ctx.answerCallbackQuery({ text: t(lang, "bot.voteBanExpired"), show_alert: true });
+      return;
+    }
+    if (outcome === "already-voted") {
+      await ctx.answerCallbackQuery({ text: t(lang, "bot.voteBanAlreadyVoted"), show_alert: true });
+      return;
+    }
+
+    const messageId = await getVoteBanMessageId(chat.id, targetUserId);
+
+    if (count >= threshold) {
+      const lifted = await liftSanction(ctx.api, chat.id, targetUserId);
+      await clearVoteBan(chat.id, targetUserId);
+      if (lifted && messageId) {
+        await ctx.api
+          .editMessageText(chat.id, messageId, t(lang, "bot.voteBanApplied"), {
+            reply_markup: { inline_keyboard: [] },
+          })
+          .catch(() => {});
+      }
+      await ctx.answerCallbackQuery({ text: t(lang, "bot.voteBanApplied") });
+      return;
+    }
+
+    if (messageId) {
+      await ctx.api
+        .editMessageReplyMarkup(chat.id, messageId, {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: t(lang, "bot.voteBanButton", { count, threshold }), callback_data: `vb:${chat.id}:${targetUserId}` }],
+            ],
+          },
+        })
+        .catch(() => {});
     }
     await ctx.answerCallbackQuery();
   });

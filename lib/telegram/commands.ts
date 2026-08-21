@@ -333,6 +333,17 @@ export function registerCommands(bot: Bot): void {
     await ctx.reply(n > 0 ? t(lang, "bot.warnLimitSet", { limit: n }) : t(lang, "bot.warnLimitDisabled"));
   });
 
+  bot.command("votebanthreshold", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim();
+    const n = Number(arg);
+    if (!arg || !Number.isInteger(n) || n < 1 || n > 50) return ctx.reply(t(lang, "bot.votebanthresholdUsage"));
+    await updateGroupSettings(ctx.chat!.id, { voteBanThreshold: n });
+    await ctx.reply(t(lang, "bot.votebanthresholdSet", { threshold: n }));
+  });
+
   bot.command("warnaction", async (ctx) => {
     const lang = await langFor(ctx);
     if (!(await requireGroupChat(ctx, lang))) return;

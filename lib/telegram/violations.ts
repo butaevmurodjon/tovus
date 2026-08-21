@@ -9,6 +9,7 @@ import { t } from "@/lib/i18n";
 import { displayName, mentionHtml } from "./format";
 import { propagateBan } from "./federation";
 import { clearWarns, recordWarn } from "@/lib/moderation/warns";
+import { startVoteBan } from "./voteban";
 
 const MUTE_DURATION_SECONDS = 60 * 60; // 1h
 
@@ -165,16 +166,41 @@ async function notifyChat(
         { until_date: Math.floor(Date.now() / 1000) + MUTE_DURATION_SECONDS }
       )
       .catch(() => {});
-    await api.sendMessage(chatId, t(lang, "bot.mutedUser", { user: mention, reason: verdict.reason }) + escalationSuffix, {
-      parse_mode: "HTML",
-    });
+    const sent = await api.sendMessage(
+      chatId,
+      t(lang, "bot.mutedUser", { user: mention, reason: verdict.reason }) + escalationSuffix,
+      { parse_mode: "HTML", reply_markup: voteBanKeyboard(lang, chatId, user.id, settings.voteBanThreshold) }
+    );
+    await startVoteBan(chatId, user.id, sent.message_id).catch(() => {});
     return;
   }
 
   if (action === "ban") {
     await api.banChatMember(chatId, user.id).catch(() => {});
-    await api.sendMessage(chatId, t(lang, "bot.bannedUser", { user: mention, reason: verdict.reason }) + escalationSuffix, {
-      parse_mode: "HTML",
-    });
+    // A federated ban is a cross-group decision (see propagateBan below) — a
+    // single group's local vote must never be able to undo that, so no button.
+    const voteEligible = !settings.federationEnabled;
+    const sent = await api.sendMessage(
+      chatId,
+      t(lang, "bot.bannedUser", { user: mention, reason: verdict.reason }) + escalationSuffix,
+      {
+        parse_mode: "HTML",
+        reply_markup: voteEligible ? voteBanKeyboard(lang, chatId, user.id, settings.voteBanThreshold) : undefined,
+      }
+    );
+    if (voteEligible) await startVoteBan(chatId, user.id, sent.message_id).catch(() => {});
   }
+}
+
+function voteBanKeyboard(lang: GroupSettings["lang"], chatId: number, userId: number, threshold: number) {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: t(lang, "bot.voteBanButton", { count: 0, threshold }),
+          callback_data: `vb:${chatId}:${userId}`,
+        },
+      ],
+    ],
+  };
 }

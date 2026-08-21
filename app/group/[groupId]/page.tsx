@@ -18,6 +18,8 @@ import type { GroupSettings } from "@/lib/db/types";
 
 const WARN_LIMIT_PRESETS = [3, 5, 10];
 
+const VOTE_BAN_THRESHOLD_PRESETS = [3, 5, 10];
+
 const RESTRICT_MINUTES_PRESETS = [5, 10, 30, 60];
 
 const CAPTCHA_TIMEOUT_PRESETS = [60, 120, 300];
@@ -244,6 +246,10 @@ export default function GroupSettingsPage() {
   const warnLimitOptions = WARN_LIMIT_PRESETS.includes(settings.warnLimit)
     ? WARN_LIMIT_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
     : [...WARN_LIMIT_PRESETS, settings.warnLimit].map((n) => ({ value: String(n), label: String(n) }));
+
+  const voteBanThresholdOptions = VOTE_BAN_THRESHOLD_PRESETS.includes(settings.voteBanThreshold)
+    ? VOTE_BAN_THRESHOLD_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
+    : [...VOTE_BAN_THRESHOLD_PRESETS, settings.voteBanThreshold].map((n) => ({ value: String(n), label: String(n) }));
 
   const restrictMinutesOptions = RESTRICT_MINUTES_PRESETS.includes(settings.restrictNewMembersMinutes)
     ? RESTRICT_MINUTES_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
@@ -477,6 +483,17 @@ export default function GroupSettingsPage() {
               </div>
             </>
           )}
+        </CardSection>
+      </Card>
+
+      <Card>
+        <CardSection title={t("miniapp.voteBanTitle")} subtitle={t("miniapp.voteBanHint")}>
+          <SegmentedControl
+            value={String(settings.voteBanThreshold)}
+            onChange={(v) => setField("voteBanThreshold", Number(v))}
+            columns={voteBanThresholdOptions.length}
+            options={voteBanThresholdOptions}
+          />
         </CardSection>
       </Card>
 

@@ -57,6 +57,11 @@ export interface GroupSettings {
   warnLimit: number;
   warnAction: "mute" | "ban";
   warnTtlDays: number;
+  /** §15.4: unique chat-member clicks needed on the "vote to lift" button
+   * under a mute/ban notice before it's auto-reversed. Never offered for
+   * federated bans (see notifyChat) — a local vote can't undo a cross-group
+   * decision. */
+  voteBanThreshold: number;
   welcomeEnabled: boolean;
   /** May contain the literal placeholder "{user}", substituted with an HTML mention on send. */
   welcomeMessage: string | null;
@@ -97,6 +102,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   warnLimit: 3,
   warnAction: "mute",
   warnTtlDays: 7,
+  voteBanThreshold: 3,
   welcomeEnabled: false,
   welcomeMessage: null,
   deleteServiceMessages: true,

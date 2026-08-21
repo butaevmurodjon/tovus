@@ -1112,6 +1112,7 @@ PATCH /api/miniapp/groups/{id} (if-match)              — оптимистич�
 | M1(b) | DeepSeek категория `"scam"` | `lib/moderation/deepseek.ts`, `lib/moderation/index.ts` | ✅ сделано |
 | M2 | `CaptchaType: "rules"` + `rulesText`, бесплатный gate | `lib/db/types.ts`, `lib/telegram/captcha.ts`, `lib/telegram/commands.ts`, `lib/telegram/bot.ts`, PATCH route, `page.tsx` | ✅ сделано |
 | M4 | Кросс-групповая рассылка для админов (переиспользует federation.ts + broadcast.ts) | `lib/telegram/federation.ts`, `lib/telegram/broadcast.ts`, новый `.../broadcast/route.ts`, новая `app/group/[groupId]/broadcast/page.tsx` | ✅ сделано |
+| M3 | Vote-ban с апелляцией, настраиваемый порог (`voteBanThreshold`) | `lib/telegram/voteban.ts` (новый), `lib/telegram/violations.ts`, `lib/telegram/bot.ts`, `lib/telegram/commands.ts`, `lib/db/types.ts`, `page.tsx` | ✅ сделано |
 
 Все — с тестами, `tsc`/`eslint`/`vitest` зелёные. Ниже — то, что осталось
 (medium-effort дифференциаторы и «крупные ставки» из исходного анализа).
@@ -1274,11 +1275,14 @@ listener, без `same_signature`/`forwarded_from` (это требует §5, �
 — частью исходного плана Этапов 1/3 без изменений.
 
 ### 15.8 Открытые вопросы (добавить к §12.2)
-6. M2: жёсткий мут (как капча) или мягкий (может читать, не постить) для
-   rules-gate?
-7. M3: порог голосов — фиксированное число или процент от активных
-   участников? Рейт-лимит на злоупотребление голосованием (боты-подставы)?
-8. M4: лимит рассылок в сутки на админа — сколько разумно без злоупотреблений?
+6. ✅ Решено: M2 — жёсткий мут (как капча), см. `startCaptcha` "rules" branch.
+7. ✅ Решено: M3 — фиксированное число, настраиваемое per-группа
+   (`voteBanThreshold`, дефолт 3, `/votebanthreshold` + Mini App). Отдельный
+   рейт-лимит на голосующих (боты-подставы) не добавлен — уникальность голоса
+   через SET уже исключает повтор одним аккаунтом; более широкий anti-brigading
+   остаётся открытым, если станет проблемой на практике.
+8. ✅ Решено: M4 — 3 рассылки в сутки на группу-источник (`ADMIN_BROADCAST_DAILY_LIMIT`
+   в `lib/telegram/broadcast.ts`).
 9. B1/B2: приоритизировать ли эти MVP выше Этапов 1/3/5 целиком, или
    держать их как «облегчённую копию» без переноса остального плана?
 

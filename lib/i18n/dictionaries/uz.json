@@ -222,6 +222,8 @@
     "activityTitle": "Фаоллик",
     "activityMessages": "Хабарлар",
     "activityJoins": "Янги аъзолар",
+    "activeHoursTitle": "Актив соатлар (UTC)",
+    "activeHoursProHint": "Гуруҳнинг актив соатлар бўйича тақсимоти PRO тарифда мавжуд — суткалик фаолликни кўриш учун тарифни расмийлаштиринг.",
     "journalTitle": "Ўчиришлар журнали",
     "journalEmpty": "Журнал бўш",
     "restore": "Тиклаш",

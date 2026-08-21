@@ -101,3 +101,46 @@ export async function getActivity(chatId: number, period: StatsPeriod): Promise<
     { messages: 0, joins: 0 }
   );
 }
+
+// --- Top active hours (§15.6 B1 — MVP analytics, Pro-gated) ---
+
+const hourlyKey = (chatId: number, date: string) => `group:${chatId}:hourly:${date}`;
+
+/** Same "not on edits" rule as incrementActivity("messages") — called
+ * alongside it, never instead of it. */
+export async function incrementHourlyActivity(chatId: number): Promise<void> {
+  const redis = getRedis();
+  const now = new Date();
+  const key = hourlyKey(chatId, dateKey(now));
+  await redis.hincrby(key, String(now.getUTCHours()), 1);
+  await redis.expire(key, STATS_TTL_SECONDS);
+}
+
+export interface HourlyActivityPoint {
+  hour: number;
+  count: number;
+}
+
+/** Pure aggregation, separated from the Redis fetch so it's testable without
+ * a live store: sums per-hour counts across a set of daily hourly buckets
+ * into a fixed 24-length (hour 0..23) array. */
+export function aggregateHourlyBuckets(buckets: (Record<string, number> | null)[]): HourlyActivityPoint[] {
+  const totals = new Array<number>(24).fill(0);
+  for (const bucket of buckets) {
+    if (!bucket) continue;
+    for (const [hourStr, count] of Object.entries(bucket)) {
+      const hour = Number(hourStr);
+      if (Number.isInteger(hour) && hour >= 0 && hour < 24) totals[hour] += Number(count) || 0;
+    }
+  }
+  return totals.map((count, hour) => ({ hour, count }));
+}
+
+export async function getTopActiveHours(chatId: number, period: StatsPeriod): Promise<HourlyActivityPoint[]> {
+  const redis = getRedis();
+  const dates = lastNDates(PERIOD_DAYS[period]);
+  const buckets = await Promise.all(
+    dates.map((d) => redis.hgetall<Record<string, number>>(hourlyKey(chatId, d)))
+  );
+  return aggregateHourlyBuckets(buckets);
+}

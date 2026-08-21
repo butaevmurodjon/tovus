@@ -7,8 +7,10 @@ import { Card, CardSection } from "@/components/Card";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { StatTile } from "@/components/StatTile";
 import { BarChart } from "@/components/BarChart";
+import { HourlyActivityChart } from "@/components/HourlyActivityChart";
+import { Badge } from "@/components/Badge";
 import { StatusScreen } from "@/components/StatusScreen";
-import type { ActivityBucket, DailyStatsPoint } from "@/lib/db/stats";
+import type { ActivityBucket, DailyStatsPoint, HourlyActivityPoint } from "@/lib/db/stats";
 import type { StatsBucket } from "@/lib/db/types";
 
 type Period = "today" | "7d" | "30d";
@@ -18,6 +20,8 @@ interface StatsResponse {
   summary: StatsBucket;
   daily: DailyStatsPoint[];
   activity: ActivityBucket;
+  topHours: HourlyActivityPoint[];
+  topHoursEligible: boolean;
 }
 
 export default function GroupStatsPage() {
@@ -89,6 +93,29 @@ export default function GroupStatsPage() {
                     premium: t("miniapp.byPremium"),
                   }}
                 />
+              )}
+            </CardSection>
+          </Card>
+
+          <Card>
+            <CardSection>
+              <h3
+                className="text-[13px] font-semibold mb-3 flex items-center gap-1.5"
+                style={{ color: "var(--ink)" }}
+              >
+                {t("miniapp.activeHoursTitle")}
+                {!data.topHoursEligible && <Badge variant="warning">PRO</Badge>}
+              </h3>
+              {!data.topHoursEligible ? (
+                <p className="text-[13px] py-4 text-center" style={{ color: "var(--ink-muted)" }}>
+                  {t("miniapp.activeHoursProHint")}
+                </p>
+              ) : data.topHours.every((h) => h.count === 0) ? (
+                <p className="text-[13px] py-6 text-center" style={{ color: "var(--ink-muted)" }}>
+                  {t("miniapp.noStats")}
+                </p>
+              ) : (
+                <HourlyActivityChart data={data.topHours} label={t("miniapp.activeHoursTitle")} />
               )}
             </CardSection>
           </Card>

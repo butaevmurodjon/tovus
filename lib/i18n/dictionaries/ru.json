@@ -222,6 +222,8 @@
     "activityTitle": "Активность",
     "activityMessages": "Сообщений",
     "activityJoins": "Новых участников",
+    "activeHoursTitle": "Активные часы (UTC)",
+    "activeHoursProHint": "Топ активных часов чата доступен на PRO — оформите тариф, чтобы видеть распределение активности по времени суток.",
     "journalTitle": "Журнал удалений",
     "journalEmpty": "Журнал пуст",
     "restore": "Восстановить",

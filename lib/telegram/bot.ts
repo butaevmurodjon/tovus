@@ -1,7 +1,7 @@
 import { Bot, webhookCallback } from "grammy";
 import { getGroupSettings, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
 import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
-import { incrementActivity, incrementStat } from "@/lib/db/stats";
+import { incrementActivity, incrementHourlyActivity, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { isGloballyBanned } from "@/lib/db/globalBan";
 import { canUseProFeature, formatPlanDate } from "@/lib/billing/plan";
@@ -366,7 +366,10 @@ export function getBot(): Bot {
 
     // An edit isn't a new message — don't count it toward "messages" activity stats.
     const sideEffects = [sweepExpiredCaptchas(ctx.api, chat.id).catch(() => {})];
-    if (!isEdit) sideEffects.push(incrementActivity(chat.id, "messages").catch(() => {}));
+    if (!isEdit) {
+      sideEffects.push(incrementActivity(chat.id, "messages").catch(() => {}));
+      sideEffects.push(incrementHourlyActivity(chat.id).catch(() => {}));
+    }
     await Promise.all(sideEffects);
 
     // A failure here must not silently skip moderation for this message — an

@@ -5,7 +5,9 @@ import { isProActive } from "@/lib/billing/plan";
 import { detectProfanity } from "./profanity";
 import { detectSpam, hasAnyLink } from "./spam";
 import { checkDuplicateFlood, checkUserFlood, consumeNewMemberFlag } from "./flood";
-import { classifyWithGroq } from "./groq";
+import { classifyWithDeepseek } from "./deepseek";
+import { detectRestrictedContent, isNewMemberRestricted } from "./newMemberGuard";
+import { isNightModeActive } from "./nightMode";
 
 export interface ModerationVerdict {
   category: ViolationCategory;
@@ -23,9 +25,31 @@ export async function moderateMessage(
   const chatId = settings.chatId;
   const userId = message.from?.id;
 
+  // Ahead of everything else, including the consumeNewMemberFlag read below:
+  // during quiet hours every member message goes regardless of content, so
+  // burning that one-shot flag on a message we're deleting anyway would rob the
+  // member of the leniency on their real first message. forceWarnOnly keeps
+  // "you posted at night" from ever escalating into a mute/ban.
+  if (isNightModeActive(settings)) {
+    return { category: "spam", reason: "тихий час: сообщения от участников ограничены", forceWarnOnly: true };
+  }
+
   // Consumed once per message so the softer treatment covers exactly the member's
   // first message, not a rolling time window.
   const isFirstMessage = userId ? await consumeNewMemberFlag(chatId, userId) : false;
+
+  // Deliberately ahead of every other check and independent of the
+  // profanityFilter/antispam toggles: forwards/links/media from a member still
+  // inside their post-join restriction window are a stronger, more specific
+  // signal than the general pattern-based checks below, and forceWarnOnly
+  // keeps a false positive (a genuine newcomer sharing a link) to a warn at
+  // worst rather than a mute/ban.
+  if (settings.restrictNewMembersEnabled && userId && (await isNewMemberRestricted(chatId, userId))) {
+    const reason = detectRestrictedContent(message);
+    if (reason) {
+      return { category: "spam", reason, forceWarnOnly: true };
+    }
+  }
 
   if (settings.profanityFilter && text) {
     const customWords = await getCustomWords(chatId);
@@ -66,12 +90,18 @@ export async function moderateMessage(
 
   if (settings.premium && text && text.trim().length >= 6) {
     const pool = isProActive(settings) ? "pro" : "free";
-    const verdict = await classifyWithGroq(text, pool);
+    const verdict = await classifyWithDeepseek(text, pool);
     if (verdict?.violation) {
       const forceWarnOnly = isFirstMessage && hasAnyLink(message);
+      const fallbackReason =
+        verdict.category === "profanity"
+          ? "нецензурная лексика (ИИ)"
+          : verdict.category === "scam"
+            ? "похоже на мошенничество (ИИ)"
+            : "спам/реклама (ИИ)";
       return {
         category: "premium",
-        reason: verdict.reason || (verdict.category === "profanity" ? "нецензурная лексика (ИИ)" : "спам/реклама (ИИ)"),
+        reason: verdict.reason || fallbackReason,
         forceWarnOnly,
       };
     }

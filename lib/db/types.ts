@@ -6,6 +6,8 @@ export type ViolationCategory = "profanity" | "spam" | "premium";
 
 export type PlanTier = "free" | "pro";
 
+export type CaptchaType = "button" | "math";
+
 export interface GroupSettings {
   chatId: number;
   title: string;
@@ -18,6 +20,11 @@ export interface GroupSettings {
   createdAt: number;
   /** Off by default — tucked into an "Advanced" section in the Mini App, not the main flow. */
   captchaEnabled: boolean;
+  /** "button" (one-tap) or "math" (pick the correct sum) — only read while
+   * captchaEnabled, so it needs no Pro gate of its own. */
+  captchaType: CaptchaType;
+  /** Seconds before an unanswered captcha expires and the member is kicked. */
+  captchaTimeoutSeconds: number;
   /** Mass-join detection; forces captcha verification on new members during a detected raid. Same eligibility gate as captcha. */
   antiraidEnabled: boolean;
   /** Same raid detection, but on by default (not opt-in) — protection for
@@ -32,7 +39,7 @@ export interface GroupSettings {
   federationEnabled: boolean;
   /** Checks new joiners against CAS (cas.chat) — a free shared database of
    * known spam/scam accounts — and bans them on join, before they can post.
-   * Free for everyone (no Groq/size cost), on by default, opt-out. */
+   * Free for everyone (no DeepSeek/size cost), on by default, opt-out. */
   casCheckEnabled: boolean;
   /** Off by default: existing groups using action="warn" get exactly the
    * behavior they always had unless they explicitly opt in — auto-escalating
@@ -50,6 +57,17 @@ export interface GroupSettings {
   /** Deletes Telegram's own "X joined/added/left the group" service messages.
    * On by default — purely cosmetic chat cleanup, no moderation tradeoff. */
   deleteServiceMessages: boolean;
+  /** Off by default: deletes forwarded messages, links, and media/stickers from
+   * a member for their first `restrictNewMembersMinutes` minutes after joining —
+   * the dominant vector for freshly-joined spam/scam accounts (ad forwards,
+   * phishing links) posted before any content pattern has a chance to repeat. */
+  restrictNewMembersEnabled: boolean;
+  restrictNewMembersMinutes: number;
+  /** Quiet hours, as UTC hours (0-23) so the window never shifts with a
+   * server/member timezone; start > end simply wraps past midnight. */
+  nightModeEnabled: boolean;
+  nightModeStartHour: number;
+  nightModeEndHour: number;
   plan: PlanTier;
   /** Unix ms. Null unless a Stars subscription has ever been active for this group. */
   planExpiresAt: number | null;
@@ -62,6 +80,8 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   action: "delete",
   logChannelId: null,
   captchaEnabled: false,
+  captchaType: "button",
+  captchaTimeoutSeconds: 120,
   antiraidEnabled: false,
   antiraidAuto: true,
   federationEnabled: false,
@@ -73,6 +93,11 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   welcomeEnabled: false,
   welcomeMessage: null,
   deleteServiceMessages: true,
+  restrictNewMembersEnabled: false,
+  restrictNewMembersMinutes: 10,
+  nightModeEnabled: false,
+  nightModeStartHour: 23,
+  nightModeEndHour: 7,
   plan: "free",
   planExpiresAt: null,
 };

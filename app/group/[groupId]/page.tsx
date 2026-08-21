@@ -17,6 +17,10 @@ import type { GroupSettings } from "@/lib/db/types";
 
 const WARN_LIMIT_PRESETS = [3, 5, 10];
 
+const RESTRICT_MINUTES_PRESETS = [5, 10, 30, 60];
+
+const CAPTCHA_TIMEOUT_PRESETS = [60, 120, 300];
+
 const PRO_GRANT_DAYS = [30, 90, 365];
 
 /** Module scope (not the component body) so the current-time read here isn't
@@ -34,6 +38,9 @@ export default function GroupSettingsPage() {
   const [welcomeInput, setWelcomeInput] = useState(settings?.welcomeMessage ?? "");
   const [savingLogChannel, setSavingLogChannel] = useState(false);
   const [savingWelcome, setSavingWelcome] = useState(false);
+  const [nightStartInput, setNightStartInput] = useState(String(settings?.nightModeStartHour ?? 23));
+  const [nightEndInput, setNightEndInput] = useState(String(settings?.nightModeEndHour ?? 7));
+  const [savingNightHours, setSavingNightHours] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
 
   if (!settings) return null;
@@ -81,6 +88,23 @@ export default function GroupSettingsPage() {
       }
     } finally {
       setSavingLogChannel(false);
+    }
+  }
+
+  async function saveNightHours() {
+    const [startRaw, endRaw] = [nightStartInput.trim(), nightEndInput.trim()];
+    const [start, end] = [Number(startRaw), Number(endRaw)];
+    const isHour = (raw: string, h: number) => raw !== "" && Number.isInteger(h) && h >= 0 && h <= 23;
+    if (!isHour(startRaw, start) || !isHour(endRaw, end)) return;
+    setSavingNightHours(true);
+    try {
+      await updateSettings({ nightModeStartHour: start, nightModeEndHour: end });
+      flash(t("miniapp.savedToast"));
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    } finally {
+      setSavingNightHours(false);
     }
   }
 
@@ -204,6 +228,20 @@ export default function GroupSettingsPage() {
     ? WARN_LIMIT_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
     : [...WARN_LIMIT_PRESETS, settings.warnLimit].map((n) => ({ value: String(n), label: String(n) }));
 
+  const restrictMinutesOptions = RESTRICT_MINUTES_PRESETS.includes(settings.restrictNewMembersMinutes)
+    ? RESTRICT_MINUTES_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
+    : [...RESTRICT_MINUTES_PRESETS, settings.restrictNewMembersMinutes].map((n) => ({
+        value: String(n),
+        label: String(n),
+      }));
+
+  const captchaTimeoutOptions = CAPTCHA_TIMEOUT_PRESETS.includes(settings.captchaTimeoutSeconds)
+    ? CAPTCHA_TIMEOUT_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
+    : [...CAPTCHA_TIMEOUT_PRESETS, settings.captchaTimeoutSeconds].map((n) => ({
+        value: String(n),
+        label: String(n),
+      }));
+
   return (
     <div className="px-4 py-4 flex flex-col gap-3">
       {toast && (
@@ -286,6 +324,76 @@ export default function GroupSettingsPage() {
           <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
             {t("miniapp.deleteServiceMessagesHint")}
           </p>
+          <Divider />
+          <Row label={t("miniapp.restrictNewMembersTitle")}>
+            <Toggle
+              checked={settings.restrictNewMembersEnabled}
+              onChange={(v) => setField("restrictNewMembersEnabled", v)}
+            />
+          </Row>
+          <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
+            {t("miniapp.restrictNewMembersHint")}
+          </p>
+          {settings.restrictNewMembersEnabled && (
+            <div className="mb-2">
+              <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                {t("miniapp.restrictNewMembersMinutesLabel")}
+              </p>
+              <SegmentedControl
+                value={String(settings.restrictNewMembersMinutes)}
+                onChange={(v) => setField("restrictNewMembersMinutes", Number(v))}
+                columns={restrictMinutesOptions.length}
+                options={restrictMinutesOptions}
+              />
+            </div>
+          )}
+          <Divider />
+          <Row label={t("miniapp.nightModeTitle")}>
+            <Toggle checked={settings.nightModeEnabled} onChange={(v) => setField("nightModeEnabled", v)} />
+          </Row>
+          <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
+            {t("miniapp.nightModeHint")}
+          </p>
+          {settings.nightModeEnabled && (
+            <div className="mb-2">
+              <div className="flex gap-2 items-end">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                    {t("miniapp.nightModeStartLabel")}
+                  </p>
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={nightStartInput}
+                    onChange={(e) => setNightStartInput(e.target.value)}
+                    className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+                    style={{ borderColor: "var(--border-strong)" }}
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                    {t("miniapp.nightModeEndLabel")}
+                  </p>
+                  <input
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={nightEndInput}
+                    onChange={(e) => setNightEndInput(e.target.value)}
+                    className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+                    style={{ borderColor: "var(--border-strong)" }}
+                  />
+                </div>
+                <Button variant="primary" onClick={saveNightHours} disabled={savingNightHours}>
+                  {t("common.save")}
+                </Button>
+              </div>
+              <p className="text-[12px] mt-1.5" style={{ color: "var(--ink-muted)" }}>
+                {t("miniapp.nightModeUtcHint")}
+              </p>
+            </div>
+          )}
           <Divider />
           <Row label={t("miniapp.premiumMode")}>
             <Toggle checked={settings.premium} onChange={(v) => setField("premium", v)} />
@@ -409,6 +517,35 @@ export default function GroupSettingsPage() {
               t={t}
               className="mb-3"
             />
+            {settings.captchaEnabled && (
+              <>
+                <div className="mb-3">
+                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                    {t("miniapp.captchaTypeLabel")}
+                  </p>
+                  <SegmentedControl
+                    value={settings.captchaType}
+                    onChange={(v) => setField("captchaType", v)}
+                    columns={2}
+                    options={[
+                      { value: "button", label: t("miniapp.captchaTypeButton") },
+                      { value: "math", label: t("miniapp.captchaTypeMath") },
+                    ]}
+                  />
+                </div>
+                <div className="mb-3">
+                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                    {t("miniapp.captchaTimeoutLabel")}
+                  </p>
+                  <SegmentedControl
+                    value={String(settings.captchaTimeoutSeconds)}
+                    onChange={(v) => setField("captchaTimeoutSeconds", Number(v))}
+                    columns={captchaTimeoutOptions.length}
+                    options={captchaTimeoutOptions}
+                  />
+                </div>
+              </>
+            )}
             <Divider />
             <Row
               label={

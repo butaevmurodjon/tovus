@@ -134,8 +134,11 @@ async function notifyChat(
   if (action === "delete") return; // silent removal, no extra chat noise
 
   if (action === "warn") {
-    const key = verdict.forceWarnOnly ? "bot.firstMessageLinkWarn" : "bot.warnedUser";
-    let text = t(lang, key, { user: mention, reason: verdict.reason });
+    // One generic, reason-templated message for every warn — forceWarnOnly now
+    // covers several unrelated leniency cases (new member link, restricted-window
+    // content, night mode), so a case-specific canned string here would show the
+    // wrong scenario's wording for the others.
+    let text = t(lang, "bot.warnedUser", { user: mention, reason: verdict.reason });
     if (!verdict.forceWarnOnly && settings.warnEscalationEnabled && escalation.warnCount !== null) {
       text += " " + t(lang, "bot.warnCount", { count: escalation.warnCount, limit: settings.warnLimit });
     }

@@ -8,6 +8,7 @@ import { canUseProFeature, formatPlanDate } from "@/lib/billing/plan";
 import { moderateMessage } from "@/lib/moderation";
 import { checkRaid, markNewMember } from "@/lib/moderation/flood";
 import { isCasBanned } from "@/lib/moderation/cas";
+import { markNewMemberRestricted } from "@/lib/moderation/newMemberGuard";
 import { detectLang, t } from "@/lib/i18n";
 import { formatPermissionWarning, isChatAdmin } from "./adminCheck";
 import { registerCommands } from "./commands";
@@ -99,21 +100,53 @@ export function getBot(): Bot {
     }
   });
 
-  // Captcha "I'm not a bot" button.
-  bot.callbackQuery(/^cap:(\d+):(\w+)$/, async (ctx) => {
+  // A group with "approve new members" turned on (invite links requiring admin
+  // approval) never fires new_chat_members for a rejected request — the account
+  // never joins — so the CAS/global-ban gates in the message handler below would
+  // never see it. This is deliberately decline-only: a request that ISN'T
+  // flagged is left untouched (still pending, exactly Telegram's default), so a
+  // group that turned this on specifically for manual vetting keeps that control
+  // — the bot only ever pre-empts requests it can already prove are bad.
+  bot.on("chat_join_request", async (ctx) => {
+    const chat = ctx.chat;
+    const user = ctx.chatJoinRequest.from;
+    if (chat.type !== "supergroup") return;
+    const settings = await getGroupSettings(chat.id);
+    if (!settings) return;
+
+    if (await isGloballyBanned(user.id)) {
+      await ctx.declineChatJoinRequest(user.id).catch(() => {});
+      await incrementStat(chat.id, "spam").catch(() => {});
+      return;
+    }
+
+    if (settings.casCheckEnabled && (await isCasBanned(user.id))) {
+      await ctx.declineChatJoinRequest(user.id).catch(() => {});
+      await incrementStat(chat.id, "spam").catch(() => {});
+    }
+  });
+
+  // Captcha button — a trailing `:<answer>` segment is present only for the
+  // "math" captcha type; "button" type omits it entirely (any click passes).
+  bot.callbackQuery(/^cap:(\d+):(\w+)(?::(-?\d+))?$/, async (ctx) => {
     const chat = ctx.chat;
     if (!chat) {
       await ctx.answerCallbackQuery();
       return;
     }
-    const [, targetIdStr, token] = ctx.match;
+    const [, targetIdStr, token, answerStr] = ctx.match;
     const targetUserId = Number(targetIdStr);
+    const answer = answerStr !== undefined ? Number(answerStr) : undefined;
     const settings = await getGroupSettings(chat.id);
     const lang = settings?.lang ?? detectLang(ctx.callbackQuery.from.language_code);
 
-    const result = await verifyCaptcha(ctx.api, chat.id, ctx.callbackQuery.from.id, targetUserId, token);
+    const result = await verifyCaptcha(ctx.api, chat.id, ctx.callbackQuery.from.id, targetUserId, token, answer);
     if (result === "wrong-user") {
       await ctx.answerCallbackQuery({ text: t(lang, "bot.captchaWrongUser"), show_alert: true });
+      return;
+    }
+    if (result === "wrong-answer") {
+      await ctx.answerCallbackQuery({ text: t(lang, "bot.captchaWrongAnswer"), show_alert: true });
       return;
     }
     await ctx.answerCallbackQuery();
@@ -179,7 +212,7 @@ export function getBot(): Bot {
             // CAS: a free, shared database of known spam/scam accounts, checked
             // before anything else — catches professional spam bots on join,
             // before they ever post a message our content filters could inspect.
-            // Free for everyone (no per-message/Groq cost), doesn't count as a
+            // Free for everyone (no per-message/DeepSeek cost), doesn't count as a
             // real "join" (no captcha/welcome/antiraid, no activity stat) since
             // the account never actually joins the community in any meaningful
             // sense — it's removed immediately.
@@ -195,6 +228,9 @@ export function getBot(): Bot {
             }
 
             await incrementActivity(chat.id, "joins").catch(() => {});
+            if (settings.restrictNewMembersEnabled) {
+              await markNewMemberRestricted(chat.id, member.id, settings.restrictNewMembersMinutes).catch(() => {});
+            }
             // antiraidAuto defaults true — raid detection runs for any eligible
             // group even if the admin never touched the manual toggle. It's
             // still the SAME single checkRaid() call either way, just gated by
@@ -202,7 +238,10 @@ export function getBot(): Bot {
             const antiraidActive = settings.antiraidEnabled || settings.antiraidAuto;
             const isRaid = antiraidActive && eligible ? await checkRaid(chat.id) : false;
             if ((settings.captchaEnabled && eligible) || isRaid) {
-              await startCaptcha(ctx.api, chat.id, member, settings.lang).catch(() => {});
+              await startCaptcha(ctx.api, chat.id, member, settings.lang, {
+                type: settings.captchaType,
+                timeoutSeconds: settings.captchaTimeoutSeconds,
+              }).catch(() => {});
             } else if (settings.welcomeEnabled && settings.welcomeMessage) {
               await sendWelcomeMessage(ctx.api, chat.id, member, settings.welcomeMessage).catch(() => {});
             }

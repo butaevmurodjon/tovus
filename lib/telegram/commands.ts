@@ -126,7 +126,16 @@ export function registerCommands(bot: Bot): void {
     await ctx.reply(message);
   });
 
-  async function toggleCommand(name: string, key: "profanityFilter" | "antispam" | "captchaEnabled" | "casCheckEnabled") {
+  async function toggleCommand(
+    name: string,
+    key:
+      | "profanityFilter"
+      | "antispam"
+      | "captchaEnabled"
+      | "casCheckEnabled"
+      | "restrictNewMembersEnabled"
+      | "nightModeEnabled"
+  ) {
     bot.command(name, async (ctx) => {
       const lang = await langFor(ctx);
       if (!(await requireGroupChat(ctx, lang))) return;
@@ -140,6 +149,34 @@ export function registerCommands(bot: Bot): void {
   toggleCommand("filter_profanity", "profanityFilter");
   toggleCommand("antispam", "antispam");
   toggleCommand("cascheck", "casCheckEnabled");
+  toggleCommand("restrictnewmembers", "restrictNewMembersEnabled");
+  toggleCommand("nightmode", "nightModeEnabled");
+
+  bot.command("restrictminutes", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim();
+    const n = Number(arg);
+    if (!arg || !Number.isInteger(n) || n < 1 || n > 1440) return ctx.reply(t(lang, "bot.restrictMinutesUsage"));
+    await updateGroupSettings(ctx.chat!.id, { restrictNewMembersMinutes: n });
+    await ctx.reply(t(lang, "bot.restrictMinutesSet", { minutes: n }));
+  });
+
+  bot.command("nighthours", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const parts = ctx.match?.toString().trim().split(/\s+/).filter(Boolean) ?? [];
+    const isHour = (v: string) => Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 23;
+    if (parts.length !== 2 || !isHour(parts[0]) || !isHour(parts[1])) {
+      return ctx.reply(t(lang, "bot.nightHoursUsage"));
+    }
+    const start = Number(parts[0]);
+    const end = Number(parts[1]);
+    await updateGroupSettings(ctx.chat!.id, { nightModeStartHour: start, nightModeEndHour: end });
+    await ctx.reply(t(lang, "bot.nightHoursSet", { start, end }));
+  });
 
   bot.command("captcha", async (ctx) => {
     const lang = await langFor(ctx);
@@ -150,6 +187,29 @@ export function registerCommands(bot: Bot): void {
     if (arg === "on" && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
     await updateGroupSettings(ctx.chat!.id, { captchaEnabled: arg === "on" });
     await ctx.reply(t(lang, arg === "on" ? "bot.captchaOn" : "bot.captchaOff"));
+  });
+
+  bot.command("captchatype", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim().toLowerCase();
+    if (arg !== "button" && arg !== "math") return ctx.reply(t(lang, "bot.captchatypeUsage"));
+    if (!(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
+    await updateGroupSettings(ctx.chat!.id, { captchaType: arg });
+    await ctx.reply(t(lang, "bot.captchatypeSet", { type: arg }));
+  });
+
+  bot.command("captchatimeout", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim();
+    const n = Number(arg);
+    if (!arg || !Number.isInteger(n) || n < 30 || n > 600) return ctx.reply(t(lang, "bot.captchatimeoutUsage"));
+    if (!(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
+    await updateGroupSettings(ctx.chat!.id, { captchaTimeoutSeconds: n });
+    await ctx.reply(t(lang, "bot.captchatimeoutSet", { seconds: n }));
   });
 
   bot.command("antiraid", async (ctx) => {

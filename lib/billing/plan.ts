@@ -42,7 +42,7 @@ export function requiresProForSize(memberCount: number | null): boolean {
 /**
  * Eligibility for Pro-only *features* (captcha, antiraid): either an active paid
  * subscription, or small enough to fall under the free-grace member threshold.
- * Not used for Groq quota routing — that's `isProActive` alone, see groq.ts.
+ * Not used for DeepSeek quota routing — that's `isProActive` alone, see deepseek.ts.
  */
 export function canUseProFeature(settings: PlanFields, memberCount: number | null): boolean {
   return isProActive(settings) || !requiresProForSize(memberCount);

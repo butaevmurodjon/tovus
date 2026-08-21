@@ -22,6 +22,25 @@ export function computeFederationCandidates(sourceChatId: number, adminGroupSets
 }
 
 /**
+ * Same trust boundary as propagateBan (shared-admin-identity, federationEnabled
+ * opt-in on the target), but exposed standalone for M4's cross-group broadcast
+ * (§15.5) — that needs the target chat IDs themselves, not a side effect on
+ * each one. Kept separate from propagateBan rather than having it call this,
+ * so the ban path (already in production) isn't touched by this addition.
+ */
+export async function getFederationTargetChatIds(sourceChatId: number): Promise<number[]> {
+  const adminIds = await getGroupAdminIds(sourceChatId);
+  if (adminIds.length === 0) return [];
+
+  const adminGroupSets = await Promise.all(adminIds.map((id) => getUserAdminGroupIds(id)));
+  const candidates = computeFederationCandidates(sourceChatId, adminGroupSets);
+  if (candidates.length === 0) return [];
+
+  const candidateSettings = await Promise.all(candidates.map((id) => getGroupSettings(id)));
+  return candidates.filter((_, i) => candidateSettings[i]?.federationEnabled === true);
+}
+
+/**
  * Propagates a ban to every other group sharing an admin with `sourceChatId`
  * that has also opted into federation. Trust boundary is shared admin
  * identity: this can only ever reach a group where someone who administers

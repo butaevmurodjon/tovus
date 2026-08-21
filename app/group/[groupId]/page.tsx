@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useApp } from "@/contexts/AppProvider";
 import { useGroup } from "@/contexts/GroupProvider";
 import { CardSection, Card } from "@/components/Card";
@@ -620,6 +621,15 @@ export default function GroupSettingsPage() {
               normalHint={t("miniapp.federationHint")}
               t={t}
             />
+            {settings.federationEnabled && (
+              <Link
+                href={`/group/${chatId}/broadcast`}
+                className="mt-3 block text-center rounded-[var(--radius-sm)] px-4 py-2.5 text-[14px] font-medium"
+                style={{ background: "#f2f1ee", color: "var(--ink)" }}
+              >
+                {t("miniapp.groupBroadcastLink")}
+              </Link>
+            )}
           </Collapsible>
         </CardSection>
       </Card>

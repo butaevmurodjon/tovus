@@ -17,6 +17,7 @@ import type { ViolationAction } from "@/lib/db/types";
 import { formatPermissionWarning, getBotPermissions, isBotAdminOfChat, isChatAdmin } from "./adminCheck";
 import { sendUpgradeInvoice } from "./payments";
 import { normalizeWelcomeMessage } from "./welcome";
+import { normalizeRulesText } from "./captcha";
 
 function miniAppButtonUrl(startParam: string): string | null {
   const username = process.env.TELEGRAM_BOT_USERNAME;
@@ -184,7 +185,14 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireAdmin(ctx, lang))) return;
     const arg = ctx.match?.toString().trim().toLowerCase();
     if (arg !== "on" && arg !== "off") return ctx.reply("/captcha on|off");
-    if (arg === "on" && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
+    if (arg === "on") {
+      // The "rules" gate is deliberately free (§15.3) — closer in spirit to
+      // welcomeMessage than to the button/math human-check types — so it skips
+      // the Pro requirement the other two types still need.
+      const settings = await getGroupSettings(ctx.chat!.id);
+      const isFreeRulesGate = settings?.captchaType === "rules";
+      if (!isFreeRulesGate && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
+    }
     await updateGroupSettings(ctx.chat!.id, { captchaEnabled: arg === "on" });
     await ctx.reply(t(lang, arg === "on" ? "bot.captchaOn" : "bot.captchaOff"));
   });
@@ -194,10 +202,25 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireGroupChat(ctx, lang))) return;
     if (!(await requireAdmin(ctx, lang))) return;
     const arg = ctx.match?.toString().trim().toLowerCase();
-    if (arg !== "button" && arg !== "math") return ctx.reply(t(lang, "bot.captchatypeUsage"));
-    if (!(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
+    if (arg !== "button" && arg !== "math" && arg !== "rules") return ctx.reply(t(lang, "bot.captchatypeUsage"));
+    if (arg !== "rules" && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
     await updateGroupSettings(ctx.chat!.id, { captchaType: arg });
     await ctx.reply(t(lang, "bot.captchatypeSet", { type: arg }));
+  });
+
+  bot.command("rulestext", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const raw = ctx.match?.toString().trim() ?? "";
+    if (!raw) return ctx.reply(t(lang, "bot.rulestextUsage"));
+    if (raw.toLowerCase() === "off") {
+      await updateGroupSettings(ctx.chat!.id, { rulesText: null });
+      await ctx.reply(t(lang, "bot.rulestextCleared"));
+      return;
+    }
+    await updateGroupSettings(ctx.chat!.id, { rulesText: normalizeRulesText(raw) });
+    await ctx.reply(t(lang, "bot.rulestextSet"));
   });
 
   bot.command("captchatimeout", async (ctx) => {

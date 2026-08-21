@@ -265,10 +265,18 @@ export function getBot(): Bot {
               }).catch(() => {});
             }
 
-            if ((settings.captchaEnabled && eligible) || isRaid || isImpersonator) {
+            // "rules" is a free type (§15.3) — doesn't need `eligible` the way
+            // button/math do. A raid or an impersonation match forces
+            // VERIFICATION specifically (proving non-bot-ness), so it always
+            // uses "button" even when the group's configured type is "rules" —
+            // an "I agree to the rules" click doesn't prove that.
+            const captchaGateEligible = settings.captchaType === "rules" || eligible;
+            const forced = isRaid || isImpersonator;
+            if ((settings.captchaEnabled && captchaGateEligible) || forced) {
               await startCaptcha(ctx.api, chat.id, member, settings.lang, {
-                type: settings.captchaType,
+                type: forced && settings.captchaType === "rules" ? "button" : settings.captchaType,
                 timeoutSeconds: settings.captchaTimeoutSeconds,
+                rulesText: settings.rulesText,
               }).catch(() => {});
             } else if (settings.welcomeEnabled && settings.welcomeMessage) {
               await sendWelcomeMessage(ctx.api, chat.id, member, settings.welcomeMessage).catch(() => {});

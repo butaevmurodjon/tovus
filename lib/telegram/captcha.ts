@@ -4,7 +4,19 @@ import type { User } from "grammy/types";
 import { getRedis } from "@/lib/db/redis";
 import type { CaptchaType } from "@/lib/db/types";
 import { t, type Lang } from "@/lib/i18n";
-import { mentionHtml } from "./format";
+import { escapeHtml, mentionHtml } from "./format";
+
+// Same rationale as welcome.ts's MAX_WELCOME_MESSAGE_LENGTH, but lower: the
+// rules prompt embeds the mention AND boilerplate text around {rules}, on top
+// of the rules text itself — a value this size still leaves headroom under
+// Telegram's 4096-char sendMessage limit after both expansions.
+export const MAX_RULES_TEXT_LENGTH = 3000;
+
+/** Trims and caps an admin-entered rules template. Doesn't escape HTML here —
+ * that happens at send time in startCaptcha, same as buildWelcomeText. */
+export function normalizeRulesText(raw: string): string {
+  return raw.trim().slice(0, MAX_RULES_TEXT_LENGTH);
+}
 
 const stateKey = (chatId: number, userId: number) => `captcha:${chatId}:${userId}`;
 const pendingSetKey = (chatId: number) => `captcha:pending:${chatId}`;
@@ -53,10 +65,10 @@ export async function startCaptcha(
   chatId: number,
   user: User,
   lang: Lang,
-  options: { type: CaptchaType; timeoutSeconds: number }
+  options: { type: CaptchaType; timeoutSeconds: number; rulesText?: string | null }
 ): Promise<void> {
   const token = randomToken();
-  const { type, timeoutSeconds } = options;
+  const { type, timeoutSeconds, rulesText } = options;
   const until = Math.floor(Date.now() / 1000) + timeoutSeconds;
 
   await api
@@ -75,6 +87,10 @@ export async function startCaptcha(
       text: String(value),
       callback_data: `cap:${user.id}:${token}:${value}`,
     }));
+  } else if (type === "rules") {
+    const rules = rulesText ? escapeHtml(rulesText) : t(lang, "bot.captchaRulesDefault");
+    text = t(lang, "bot.captchaRulesPrompt", { user: mentionHtml(user), seconds: timeoutSeconds, rules });
+    buttons = [{ text: t(lang, "bot.captchaRulesButton"), callback_data: `cap:${user.id}:${token}` }];
   } else {
     text = t(lang, "bot.captchaPrompt", { user: mentionHtml(user), seconds: timeoutSeconds });
     buttons = [{ text: t(lang, "bot.captchaButton"), callback_data: `cap:${user.id}:${token}` }];

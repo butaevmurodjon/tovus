@@ -1110,6 +1110,7 @@ PATCH /api/miniapp/groups/{id} (if-match)              — оптимистич�
 | Q4 | Автомодерация заявок на вступление (CAS/глобал-бан на `chat_join_request`, decline-only) | `lib/telegram/bot.ts` | ✅ сделано |
 | M1(a) | Имперсонация имени/username админа при join (fuzzy, без ИИ) | `lib/moderation/fuzzy.ts`, `lib/moderation/normalize.ts`, `lib/moderation/impersonation.ts`, `lib/db/admins.ts`, `lib/telegram/bot.ts` | ✅ сделано |
 | M1(b) | DeepSeek категория `"scam"` | `lib/moderation/deepseek.ts`, `lib/moderation/index.ts` | ✅ сделано |
+| M2 | `CaptchaType: "rules"` + `rulesText`, бесплатный gate | `lib/db/types.ts`, `lib/telegram/captcha.ts`, `lib/telegram/commands.ts`, `lib/telegram/bot.ts`, PATCH route, `page.tsx` | ✅ сделано |
 
 Все — с тестами, `tsc`/`eslint`/`vitest` зелёные. Ниже — то, что осталось
 (medium-effort дифференциаторы и «крупные ставки» из исходного анализа).

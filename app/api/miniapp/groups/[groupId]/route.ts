@@ -62,8 +62,13 @@ export async function PATCH(
   const rejected: string[] = [];
   const gateKeys = ["captchaEnabled", "antiraidEnabled", "federationEnabled"] as const;
   if (!isProActive(settings)) {
+    // "rules" is a free captcha type (§15.3) — enabling captcha while that
+    // type is (or is becoming) active must not be rejected as a Pro feature.
+    const resolvedCaptchaType = patch.captchaType ?? settings.captchaType;
     for (const key of gateKeys) {
-      if (patch[key] === true) rejected.push(key);
+      if (patch[key] !== true) continue;
+      if (key === "captchaEnabled" && resolvedCaptchaType === "rules") continue;
+      rejected.push(key);
     }
   }
 

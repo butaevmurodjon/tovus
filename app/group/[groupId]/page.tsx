@@ -36,8 +36,10 @@ export default function GroupSettingsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [logChannelInput, setLogChannelInput] = useState(settings?.logChannelId?.toString() ?? "");
   const [welcomeInput, setWelcomeInput] = useState(settings?.welcomeMessage ?? "");
+  const [rulesTextInput, setRulesTextInput] = useState(settings?.rulesText ?? "");
   const [savingLogChannel, setSavingLogChannel] = useState(false);
   const [savingWelcome, setSavingWelcome] = useState(false);
+  const [savingRulesText, setSavingRulesText] = useState(false);
   const [nightStartInput, setNightStartInput] = useState(String(settings?.nightModeStartHour ?? 23));
   const [nightEndInput, setNightEndInput] = useState(String(settings?.nightModeEndHour ?? 7));
   const [savingNightHours, setSavingNightHours] = useState(false);
@@ -122,6 +124,20 @@ export default function GroupSettingsPage() {
       flash(t("miniapp.errorToast"));
     } finally {
       setSavingWelcome(false);
+    }
+  }
+
+  async function saveRulesText() {
+    const trimmed = rulesTextInput.trim();
+    setSavingRulesText(true);
+    try {
+      await updateSettings({ rulesText: trimmed === "" ? null : trimmed });
+      flash(t("miniapp.savedToast"));
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    } finally {
+      setSavingRulesText(false);
     }
   }
 
@@ -526,13 +542,33 @@ export default function GroupSettingsPage() {
                   <SegmentedControl
                     value={settings.captchaType}
                     onChange={(v) => setField("captchaType", v)}
-                    columns={2}
+                    columns={3}
                     options={[
                       { value: "button", label: t("miniapp.captchaTypeButton") },
                       { value: "math", label: t("miniapp.captchaTypeMath") },
+                      { value: "rules", label: t("miniapp.captchaTypeRules") },
                     ]}
                   />
                 </div>
+                {settings.captchaType === "rules" && (
+                  <div className="mb-3">
+                    <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                      {t("miniapp.rulesTextLabel")}
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        value={rulesTextInput}
+                        onChange={(e) => setRulesTextInput(e.target.value)}
+                        placeholder={t("miniapp.rulesTextPlaceholder")}
+                        className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+                        style={{ borderColor: "var(--border-strong)" }}
+                      />
+                      <Button variant="primary" onClick={saveRulesText} disabled={savingRulesText}>
+                        {t("common.save")}
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <div className="mb-3">
                   <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
                     {t("miniapp.captchaTimeoutLabel")}

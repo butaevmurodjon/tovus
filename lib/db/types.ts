@@ -6,7 +6,7 @@ export type ViolationCategory = "profanity" | "spam" | "premium";
 
 export type PlanTier = "free" | "pro";
 
-export type CaptchaType = "button" | "math";
+export type CaptchaType = "button" | "math" | "rules";
 
 export interface GroupSettings {
   chatId: number;
@@ -20,9 +20,15 @@ export interface GroupSettings {
   createdAt: number;
   /** Off by default — tucked into an "Advanced" section in the Mini App, not the main flow. */
   captchaEnabled: boolean;
-  /** "button" (one-tap) or "math" (pick the correct sum) — only read while
-   * captchaEnabled, so it needs no Pro gate of its own. */
+  /** "button" (one-tap) / "math" (pick the correct sum) are Pro-gated like the
+   * rest of captchaEnabled; "rules" (agree-to-rules gate, §15.3) is deliberately
+   * free — closer in spirit to welcomeMessage than to the human-check types —
+   * see the captchaType === "rules" carve-outs in commands.ts and the PATCH route. */
   captchaType: CaptchaType;
+  /** Rules text shown (HTML-escaped) before the "I agree" button when
+   * captchaType is "rules". Null falls back to a generic prompt — enabling
+   * the rules-gate is never blocked on this being set first. */
+  rulesText: string | null;
   /** Seconds before an unanswered captcha expires and the member is kicked. */
   captchaTimeoutSeconds: number;
   /** Mass-join detection; forces captcha verification on new members during a detected raid. Same eligibility gate as captcha. */
@@ -81,6 +87,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   logChannelId: null,
   captchaEnabled: false,
   captchaType: "button",
+  rulesText: null,
   captchaTimeoutSeconds: 120,
   antiraidEnabled: false,
   antiraidAuto: true,

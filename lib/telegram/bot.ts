@@ -1,6 +1,6 @@
 import { Bot, webhookCallback } from "grammy";
 import { getGroupSettings, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
-import { clearGroupAdmins, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
+import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
 import { incrementActivity, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { isGloballyBanned } from "@/lib/db/globalBan";
@@ -9,6 +9,8 @@ import { moderateMessage } from "@/lib/moderation";
 import { checkRaid, markNewMember } from "@/lib/moderation/flood";
 import { isCasBanned } from "@/lib/moderation/cas";
 import { markNewMemberRestricted } from "@/lib/moderation/newMemberGuard";
+import { isLikelyAdminImpersonation } from "@/lib/moderation/impersonation";
+import { addJournalEntry } from "@/lib/db/journal";
 import { detectLang, t } from "@/lib/i18n";
 import { formatPermissionWarning, isChatAdmin } from "./adminCheck";
 import { registerCommands } from "./commands";
@@ -95,7 +97,8 @@ export function getBot(): Bot {
       const wasAdmin = ["administrator", "creator"].includes(update.old_chat_member.status);
       const isAdmin = ["administrator", "creator"].includes(update.new_chat_member.status);
       if (wasAdmin !== isAdmin) {
-        await setUserAdminStatus(chat.id, update.new_chat_member.user.id, isAdmin).catch(() => {});
+        const identity = isAdmin ? identityOf(update.new_chat_member.user) : undefined;
+        await setUserAdminStatus(chat.id, update.new_chat_member.user.id, isAdmin, identity).catch(() => {});
       }
     }
   });
@@ -237,7 +240,32 @@ export function getBot(): Bot {
             // a broader condition, not a second independent check.
             const antiraidActive = settings.antiraidEnabled || settings.antiraidAuto;
             const isRaid = antiraidActive && eligible ? await checkRaid(chat.id) : false;
-            if ((settings.captchaEnabled && eligible) || isRaid) {
+
+            // §15.2(a): name/username close enough to an existing admin's to be a
+            // phishing setup. Never a ban (homonyms happen) — just forces
+            // verification and a journal note, same as isRaid below, and
+            // deliberately NOT gated by captchaEnabled/eligible: this is core
+            // safety, not a Pro perk (see §15.1's "don't paywall core safety").
+            const isImpersonator = await isLikelyAdminImpersonation(chat.id, member).catch(() => false);
+            if (isImpersonator) {
+              await addJournalEntry({
+                id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+                chatId: chat.id,
+                messageId: message.message_id,
+                userId: member.id,
+                username: member.username ?? null,
+                displayName: displayName(member),
+                text: "",
+                category: "spam",
+                reason: "похоже на имперсонацию администратора",
+                action: "warn",
+                escalated: false,
+                timestamp: Date.now(),
+                restored: false,
+              }).catch(() => {});
+            }
+
+            if ((settings.captchaEnabled && eligible) || isRaid || isImpersonator) {
               await startCaptcha(ctx.api, chat.id, member, settings.lang, {
                 type: settings.captchaType,
                 timeoutSeconds: settings.captchaTimeoutSeconds,

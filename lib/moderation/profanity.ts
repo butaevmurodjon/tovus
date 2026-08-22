@@ -42,14 +42,16 @@ const LETTER_CLASSES: Record<string, string> = {
 };
 
 // Symbol-only separator: tolerates "п.и.з.д.а", "х_у_й", "х-у-й", etc. for every root.
+// Deliberately NEVER matches a literal space, for any root length. Short roots
+// spanning a real word gap was the original concern ("с укропом" via "сук") —
+// but the 2026-08 audit found 4+ letter roots do it too: "ебан"/"ебал" (both
+// well past the old 4-letter cutoff) matched across "целы[е] [бан]ки" and
+// "хороши[е] [бал]лы" by eating the space between an unrelated word ending in
+// "е" and the next word starting with "бан"/"бал". A root being long enough to
+// "feel" specific doesn't stop it decomposing across a boundary at a common
+// letter. Whitespace tolerance is retained nowhere; symbol-obfuscation (which is
+// the overwhelmingly more common real evasion pattern) is still fully caught.
 const SYMBOL_SEPARATOR = "[\\-_.,*'`~]{0,2}";
-// Also tolerates a literal space between letters ("х у й") — but only applied to
-// roots of 4+ letters. Short 2-3 letter roots (хуй, бля, сук, ...) are common enough
-// letter sequences that allowing them to span a real word boundary (e.g. "с укропом")
-// produces false positives on ordinary sentences; symbol-obfuscation is still caught,
-// which covers the overwhelmingly more common evasion pattern in practice.
-const FULL_SEPARATOR = "[\\s\\-_.,*'`~]{0,2}";
-const MIN_LEN_FOR_WHITESPACE_SEPARATOR = 4;
 
 // Regex-special characters need escaping before landing inside a `[...]` class —
 // without this, a word containing e.g. "^" would build `[^]+`, which in JS matches
@@ -61,7 +63,6 @@ function escapeForCharClass(ch: string): string {
 }
 
 function buildWordPattern(word: string): string {
-  const separator = word.length >= MIN_LEN_FOR_WHITESPACE_SEPARATOR ? FULL_SEPARATOR : SYMBOL_SEPARATOR;
   return word
     .split("")
     .map((ch) => {
@@ -69,7 +70,7 @@ function buildWordPattern(word: string): string {
       const uniq = Array.from(new Set(classChars.split(""))).map(escapeForCharClass).join("");
       return `[${uniq}]+`;
     })
-    .join(separator);
+    .join(SYMBOL_SEPARATOR);
 }
 
 const ALL_ROOTS = [...RU_PROFANITY_ROOTS, ...UZ_PROFANITY_ROOTS];

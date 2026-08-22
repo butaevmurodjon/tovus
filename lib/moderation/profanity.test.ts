@@ -13,7 +13,16 @@ describe("detectProfanity — dictionary", () => {
   it("catches symbol-separated obfuscation on longer roots", () => {
     expect(detectProfanity("п.и.з.д.а").matched).toBe(true);
     expect(detectProfanity("заебал").matched).toBe(true);
-    expect(detectProfanity("за е б а л").matched).toBe(true);
+  });
+
+  it("does not tolerate a literal space between letters, even for longer roots (regression)", () => {
+    // 2026-08 audit: whitespace tolerance for 4+ letter roots was removed
+    // entirely — "ебан"/"ебал" were spanning real word gaps ("целы[е] [бан]ки",
+    // "хороши[е] [бал]лы"), see the cross-word-boundary test below. Deliberate
+    // trade-off: this specific spaced-out evasion is no longer caught here,
+    // symbol obfuscation ("х-у-й" etc.) still is, and this is a much rarer
+    // real evasion pattern than the false positives it was causing.
+    expect(detectProfanity("за е б а л").matched).toBe(false);
   });
 
   it("does not flag ordinary text", () => {
@@ -61,6 +70,54 @@ describe("detectProfanity — dictionary", () => {
     expect(detectProfanity("гнилой урожай в этом году, перегной для рассады").matched).toBe(false);
   });
 
+  it("does not flag real production messages that were false-flagged as profanity (regression)", () => {
+    // 2026-08 audit — three real user reports, all flagged with reason
+    // "нецензурная лексика" despite containing no profanity:
+    expect(
+      detectProfanity("Дождь будет😁 WB taxi едет только деньги с карты сразу списали🙄").matched
+    ).toBe(false);
+    expect(detectProfanity("Мне целые банки пришли, я про Махеев").matched).toBe(false);
+    expect(
+      detectProfanity(
+        "Доброй ночи. Так акция есть или закончилась? Я смогу использовать свои 50000? Или откажут?"
+      ).matched
+    ).toBe(false);
+    // Same root ("сра") flagged a fourth real message reported right after the fix started.
+    expect(detectProfanity("Я как увидела сразу про вас подумала").matched).toBe(false);
+  });
+
+  it("does not flag common Russian words colliding with the 2026-08-removed/tightened roots (regression)", () => {
+    // "сра" (→ "срал"/"срат") used to match inside "сразу"/"сравнили"/"сражение".
+    expect(detectProfanity("курс доллара сразу вырос").matched).toBe(false);
+    expect(detectProfanity("мы сравнили цены в двух магазинах").matched).toBe(false);
+    expect(detectProfanity("это было настоящее сражение за победу").matched).toBe(false);
+    // "муд" (redundant with мудак/мудил, now removed) used to match "мудрый"/"мудрость".
+    expect(detectProfanity("она была очень мудрой женщиной, полной мудрости").matched).toBe(false);
+    expect(detectProfanity("мудрец сказал важную вещь").matched).toBe(false);
+    // "конч" (removed — too polysemous for a regex to disambiguate) used to
+    // match the ordinary "to end/run out" sense of кончить(ся).
+    expect(detectProfanity("собрание закончилось поздно, все устали").matched).toBe(false);
+    expect(detectProfanity("кончилось молоко, надо купить").matched).toBe(false);
+    expect(detectProfanity("договор кончился в среду").matched).toBe(false);
+    // "хер" matching the city name "Херсон" — fixed via whitelist, not root removal.
+    expect(detectProfanity("Херсон сегодня в новостях").matched).toBe(false);
+    // "манда" matching mid-word inside "команда"/"командир" — fixed via whitelist.
+    expect(detectProfanity("наша команда выиграла матч, командир гордился").matched).toBe(false);
+    // Actual profanity forms these changes must still catch.
+    expect(detectProfanity("мудак ты редкостный").matched).toBe(true);
+    expect(detectProfanity("манда твоя").matched).toBe(true);
+    expect(detectProfanity("ты просто мудило").matched).toBe(true);
+  });
+
+  it("does not flag a 4+ letter root spanning a real word gap (regression)", () => {
+    // Root "ебан"/"ебал" were eating the space between an unrelated word ending
+    // in "е" and the next word starting with "бан"/"бал" — this is the same
+    // class of bug the short-root whitespace restriction already guarded
+    // against, just not caught for longer roots until the 2026-08 audit.
+    expect(detectProfanity("Хорошие баллы получили почти все").matched).toBe(false);
+    expect(detectProfanity("Прекрасные балы устраивали в 19 веке").matched).toBe(false);
+  });
+
   it("does not flag common Russian words that collided with removed UZ roots (regression)", () => {
     // The UZ root "кот" matched "кот" (cat), "скот" (livestock), "который",
     // "котёл" — hit every Russian-language agro/pet message regardless of the
@@ -82,9 +139,14 @@ describe("detectProfanity — custom words", () => {
     expect(result.source).toBe("custom");
   });
 
-  it("tolerates spacing/symbols in custom words the same way as the dictionary", () => {
-    expect(detectProfanity("к а з и н о сегодня", ["казино"]).matched).toBe(true);
+  it("tolerates symbol obfuscation in custom words the same way as the dictionary", () => {
     expect(detectProfanity("подпишись на крипто-сигналы", ["крипто-сигналы"]).matched).toBe(true);
+  });
+
+  it("does not tolerate a literal space in custom words either (regression)", () => {
+    // Same 2026-08 whitespace-tolerance removal as the dictionary — an admin-entered
+    // word carries the identical cross-word collision risk as a dictionary root.
+    expect(detectProfanity("к а з и н о сегодня", ["казино"]).matched).toBe(false);
   });
 
   it("does not affect unrelated text", () => {

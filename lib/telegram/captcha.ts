@@ -150,6 +150,13 @@ export async function verifyCaptcha(
   return "ok";
 }
 
+// Caps how many pending entries one sweep looks at — the ban+unban round trip
+// for an actually-expired one is sequential (real Telegram API mutations), and
+// an uncapped loop during a raid (large pending set) risks running this single
+// webhook past the platform's timeout. The rest stays in `pending` and gets
+// picked up by the next sweep (next message in the chat), not lost.
+const SWEEP_BATCH_SIZE = 50;
+
 /**
  * No persistent worker in this serverless/webhook deployment, so expiry is swept
  * lazily on the next incoming message for that chat rather than on a timer —
@@ -161,11 +168,16 @@ export async function sweepExpiredCaptchas(api: Api, chatId: number): Promise<vo
   const pending = await redis.smembers<string[]>(pendingSetKey(chatId));
   if (!pending || pending.length === 0) return;
 
-  for (const userIdStr of pending) {
-    const userId = Number(userIdStr);
-    const stillActive = await redis.exists(stateKey(chatId, userId));
-    if (stillActive) continue;
+  // `exists` checks are batched in parallel so the batch cap bounds actual
+  // work, not just iteration count — during a raid, most of `pending` is
+  // recently-issued captchas that are still active, and a sequential
+  // check-then-continue loop would burn the whole cap on those without ever
+  // reaching the ones actually due for a kick.
+  const userIds = pending.slice(0, SWEEP_BATCH_SIZE).map(Number);
+  const stillActiveFlags = await Promise.all(userIds.map((userId) => redis.exists(stateKey(chatId, userId))));
+  const expiredUserIds = userIds.filter((_, i) => !stillActiveFlags[i]);
 
+  for (const userId of expiredUserIds) {
     await api.banChatMember(chatId, userId).catch(() => {});
     const unbanned = await api
       .unbanChatMember(chatId, userId, { only_if_banned: true })

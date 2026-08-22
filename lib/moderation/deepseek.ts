@@ -1,4 +1,5 @@
 import { getRedis } from "@/lib/db/redis";
+import { fetchWithTimeout } from "@/lib/http";
 
 const API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-chat";
@@ -122,27 +123,27 @@ export async function classifyWithDeepseek(text: string, pool: QuotaPool = "free
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      const res = await fetch(API_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+      const res = await fetchWithTimeout(
+        API_URL,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            temperature: 0,
+            max_tokens: COMPLETION_TOKEN_BUDGET,
+            response_format: { type: "json_object" },
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              { role: "user", content: text.slice(0, 2000) },
+            ],
+          }),
         },
-        body: JSON.stringify({
-          model: MODEL,
-          temperature: 0,
-          max_tokens: COMPLETION_TOKEN_BUDGET,
-          response_format: { type: "json_object" },
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: text.slice(0, 2000) },
-          ],
-        }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+        REQUEST_TIMEOUT_MS
+      );
 
       if (!res.ok) {
         const retriable = res.status === 429 || res.status >= 500;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useApp } from "@/contexts/AppProvider";
 import { useGroup } from "@/contexts/GroupProvider";
@@ -47,6 +47,21 @@ export default function GroupSettingsPage() {
   const [nightEndInput, setNightEndInput] = useState(String(settings?.nightModeEndHour ?? 7));
   const [savingNightHours, setSavingNightHours] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
+  // §3 audit: pollForProActivation below is a setTimeout chain that used to run
+  // unconditionally to completion — `cancelled` stops it from calling `refresh()`
+  // after this page unmounts, `active` stops a second click from starting a
+  // second overlapping poll cycle while one is already in flight.
+  const upgradePollRef = useRef({ cancelled: false, active: false });
+
+  useEffect(() => {
+    // Captured once, not re-read as upgradePollRef.current inside the cleanup —
+    // safe only because .current is mutated in place elsewhere and never
+    // reassigned; if that ever changes, this closure would mutate an orphaned object.
+    const pollState = upgradePollRef.current;
+    return () => {
+      pollState.cancelled = true;
+    };
+  }, []);
 
   if (!settings) return null;
 
@@ -196,6 +211,11 @@ export default function GroupSettingsPage() {
   }
 
   async function handleUpgrade() {
+    // setUpgrading(false) below (in `finally`) fires as soon as openInvoice is
+    // called, well before payment completes — `active` is what actually covers
+    // the whole poll-until-confirmed window, so this is the guard that stops a
+    // second click from starting a second overlapping invoice+poll cycle.
+    if (upgradePollRef.current.active) return;
     haptic("light");
     setUpgrading(true);
     try {
@@ -207,6 +227,7 @@ export default function GroupSettingsPage() {
           // this callback — a single fixed-delay refresh can land before it commits
           // and show the group as still on the free plan. Poll with backoff instead
           // of guessing one delay that works for every payment.
+          upgradePollRef.current.active = true;
           pollForProActivation();
         }
       });
@@ -220,20 +241,30 @@ export default function GroupSettingsPage() {
 
   function pollForProActivation(attempt = 0) {
     const delays = [1200, 1800, 2500, 3500];
-    if (attempt >= delays.length) return;
+    if (attempt >= delays.length) {
+      upgradePollRef.current.active = false;
+      return;
+    }
     setTimeout(async () => {
+      // The page may have unmounted (navigated away) since this was scheduled —
+      // `refresh()` targets GroupProvider context state, which can outlive this
+      // page, so without this check a stale poll would keep calling it after
+      // the user left, and/or reschedule itself forever.
+      if (upgradePollRef.current.cancelled) return;
       // Check freshly-fetched settings directly rather than the `settings` closed
       // over at call time — `refresh()` only schedules a state update, so reading
       // context state right after calling it would still see the stale value.
       try {
         const data = await fetcher<{ settings: GroupSettings }>(`/api/miniapp/groups/${chatId}`);
+        if (upgradePollRef.current.cancelled) return; // unmounted while the fetch was in flight
         if (isProActive(data.settings)) {
           refresh();
+          upgradePollRef.current.active = false;
         } else {
           pollForProActivation(attempt + 1);
         }
       } catch {
-        pollForProActivation(attempt + 1);
+        if (!upgradePollRef.current.cancelled) pollForProActivation(attempt + 1);
       }
     }, delays[attempt]);
   }

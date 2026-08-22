@@ -1,4 +1,5 @@
 import { getRedis } from "@/lib/db/redis";
+import { fetchWithTimeout } from "@/lib/http";
 
 // CAS (Combot Anti-Spam System, cas.chat) — a free, keyless, public API backed
 // by a shared database of accounts already banned as spam/scam across every
@@ -24,10 +25,7 @@ export async function isCasBanned(userId: number): Promise<boolean> {
 
   let banned = false;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), CAS_TIMEOUT_MS);
-    const res = await fetch(`https://api.cas.chat/check?user_id=${userId}`, { signal: controller.signal });
-    clearTimeout(timeout);
+    const res = await fetchWithTimeout(`https://api.cas.chat/check?user_id=${userId}`, {}, CAS_TIMEOUT_MS);
     const data = (await res.json()) as { ok?: boolean };
     banned = data.ok === true;
   } catch {

@@ -56,7 +56,11 @@ export async function propagateBan(api: Api, sourceChatId: number, user: User, r
   const candidates = computeFederationCandidates(sourceChatId, adminGroupSets);
   if (candidates.length === 0) return;
 
-  await Promise.all(
+  // allSettled, not all: getGroupSettings can throw (a Redis/network error is
+  // not caught internally), and a plain Promise.all would let one candidate's
+  // failure reject the whole batch, silently skipping ban propagation to
+  // every OTHER candidate that would otherwise have succeeded.
+  await Promise.allSettled(
     candidates.map(async (targetChatId) => {
       const targetSettings = await getGroupSettings(targetChatId);
       if (!targetSettings?.federationEnabled) return;

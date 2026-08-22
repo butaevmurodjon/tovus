@@ -168,14 +168,26 @@
 платформы, и любые цепочки `setTimeout` обязаны иметь отмену**. grammY
 `onTimeout: "return"` уже защищает от «повисшего» вебхука — сохранять это.
 
-### 3.4 Чек-лист внедрения (Этап 0)
-- [ ] Helper `withTimeout<T>(promise, ms, onTimeout)` (использовать в Groq, CAS).
-- [ ] `clearTimeout` в `finally` в Groq/CAS.
-- [ ] `pollForProActivation` — `useRef`-флаг, отмена при unmount, guard от дублей.
-- [ ] `federation.ts` → `Promise.allSettled`.
-- [ ] `sweepExpiredCaptchas` — лимит батча.
-- [ ] Тесты: unit-тест таймаут-хелпера; тест, что `pollForProActivation`
-      не вызывает `setState` после отмены.
+### 3.4 Чек-лист внедрения (Этап 0) ✅ сделано
+- [x] Helper `fetchWithTimeout(url, init, ms)` в `lib/http.ts` (не generic
+      `withTimeout<T>` — оба реальных сайта использования оборачивают именно
+      `fetch`+`AbortController`, обёртка под это и заточена); используется в
+      `lib/moderation/deepseek.ts` (бывш. groq.ts) и `lib/moderation/cas.ts`.
+- [x] `clearTimeout` в `finally` — внутри `fetchWithTimeout`, для обоих сайтов сразу.
+- [x] `pollForProActivation` (`app/group/[groupId]/page.tsx`, не
+      `contexts/GroupProvider.tsx` — функция уже была перенесена туда) —
+      `useRef`-флаг `{cancelled, active}`, отмена при unmount, guard от
+      повторного клика «Оформить PRO».
+- [x] `federation.ts` → `Promise.allSettled` в `propagateBan`.
+- [x] `sweepExpiredCaptchas` — лимит батча (50), причём `exists`-проверки
+      батчатся параллельно, чтобы во время рейда кап не расходовался целиком
+      на «ещё активные» записи, не доходя до реально просроченных.
+- [x] Тест на `fetchWithTimeout` (успех / abort по таймауту / очистка таймера
+      при отказе не по таймауту / проброс init). Тест на `pollForProActivation`
+      **не добавлен** — в проекте нет ни одного `.test.tsx`/RTL/jsdom
+      (node-only vitest), заводить эту инфраструктуру ради одного теста было
+      признано непропорциональным; проверено через `tsc`/`eslint`/`next build`,
+      как и остальные правки `page.tsx` в этой сессии.
 
 **Оценка эффекта:** низкая стоимость, средняя ценность (стабильность,
 меньше «висячих» состояний). Файлы: `lib/moderation/groq.ts`,

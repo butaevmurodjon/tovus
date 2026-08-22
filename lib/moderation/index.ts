@@ -8,12 +8,17 @@ import { checkDuplicateFlood, checkUserFlood, consumeNewMemberFlag } from "./flo
 import { classifyWithDeepseek } from "./deepseek";
 import { detectRestrictedContent, isNewMemberRestricted } from "./newMemberGuard";
 import { isNightModeActive } from "./nightMode";
+import { isRepeatOffender } from "./reputation";
 
 export interface ModerationVerdict {
   category: ViolationCategory;
   reason: string;
   /** When true, apply "warn" regardless of the group's configured action — e.g. a brand-new member's first link. */
   forceWarnOnly: boolean;
+  /** False only for night mode's blanket restriction (§15.7 B2): that fires for
+   * every member regardless of content, so it isn't evidence of bad behavior
+   * and must not feed reputation.ts — everything else defaults true. */
+  countsTowardReputation?: boolean;
 }
 
 export async function moderateMessage(
@@ -31,12 +36,34 @@ export async function moderateMessage(
   // member of the leniency on their real first message. forceWarnOnly keeps
   // "you posted at night" from ever escalating into a mute/ban.
   if (isNightModeActive(settings)) {
-    return { category: "spam", reason: "тихий час: сообщения от участников ограничены", forceWarnOnly: true };
+    return {
+      category: "spam",
+      reason: "тихий час: сообщения от участников ограничены",
+      forceWarnOnly: true,
+      countsTowardReputation: false,
+    };
   }
 
   // Consumed once per message so the softer treatment covers exactly the member's
   // first message, not a rolling time window.
   const isFirstMessage = userId ? await consumeNewMemberFlag(chatId, userId) : false;
+
+  // §4.5 / §15.7 B2 MVP: a proven repeat offender in THIS chat loses the
+  // benefit-of-the-doubt leniency (forceWarnOnly) below — never a stronger
+  // action than the group already has configured, just no free pass. Fail
+  // open: any Redis error reads as "not a repeat offender".
+  //
+  // Deliberate, not incidental: stripping forceWarnOnly also lets this
+  // verdict start counting toward warnEscalation (applyViolation only skips
+  // recordWarn for a *forced* warn, see violations.ts's isForcedWarn) — so a
+  // repeat offender who kept triggering leniency-covered violations (e.g.
+  // repeated forwards during their new-member restriction window, which was
+  // unconditionally forceWarnOnly before this) now both loses the free pass
+  // AND starts accumulating real warns from that point on. That's the
+  // intended effect of "no more benefit of the doubt," not a side effect to
+  // suppress — closes exactly the P1/P7-style gap where soft-touch leniency
+  // had no ceiling.
+  const isKnownRepeatOffender = userId ? await isRepeatOffender(chatId, userId).catch(() => false) : false;
 
   // Deliberately ahead of every other check and independent of the
   // profanityFilter/antispam toggles: forwards/links/media from a member still
@@ -47,7 +74,7 @@ export async function moderateMessage(
   if (settings.restrictNewMembersEnabled && userId && (await isNewMemberRestricted(chatId, userId))) {
     const reason = detectRestrictedContent(message);
     if (reason) {
-      return { category: "spam", reason, forceWarnOnly: true };
+      return { category: "spam", reason, forceWarnOnly: !isKnownRepeatOffender };
     }
   }
 
@@ -63,7 +90,7 @@ export async function moderateMessage(
   if (settings.antispam) {
     const spamResult = detectSpam(message);
     if (spamResult.matched) {
-      const forceWarnOnly = isFirstMessage && spamResult.severity === "low";
+      const forceWarnOnly = isFirstMessage && spamResult.severity === "low" && !isKnownRepeatOffender;
       return { category: "spam", reason: spamResult.reason ?? "спам", forceWarnOnly };
     }
 
@@ -92,7 +119,7 @@ export async function moderateMessage(
     const pool = isProActive(settings) ? "pro" : "free";
     const verdict = await classifyWithDeepseek(text, pool);
     if (verdict?.violation) {
-      const forceWarnOnly = isFirstMessage && hasAnyLink(message);
+      const forceWarnOnly = isFirstMessage && hasAnyLink(message) && !isKnownRepeatOffender;
       const fallbackReason =
         verdict.category === "profanity"
           ? "нецензурная лексика (ИИ)"

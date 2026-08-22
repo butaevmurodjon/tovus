@@ -1,4 +1,5 @@
 import { Bot, webhookCallback } from "grammy";
+import type { Message, User } from "grammy/types";
 import { getGroupSettings, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
 import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
 import { incrementActivity, incrementHourlyActivity, incrementStat } from "@/lib/db/stats";
@@ -10,6 +11,8 @@ import { checkRaid, markNewMember } from "@/lib/moderation/flood";
 import { isCasBanned } from "@/lib/moderation/cas";
 import { markNewMemberRestricted } from "@/lib/moderation/newMemberGuard";
 import { isLikelyAdminImpersonation } from "@/lib/moderation/impersonation";
+import { recordReputationHit } from "@/lib/moderation/reputation";
+import { isSuspiciousJoinVelocity, recordJoinedGroup } from "@/lib/db/userGraph";
 import { addJournalEntry } from "@/lib/db/journal";
 import { detectLang, t } from "@/lib/i18n";
 import { formatPermissionWarning, isChatAdmin } from "./adminCheck";
@@ -22,6 +25,28 @@ import { activateProPlan, parseProPayload } from "./payments";
 import { displayName } from "./format";
 
 let _bot: Bot | null = null;
+
+/** Shared by isImpersonator and isNetworkJoin below — both are join-time,
+ * non-message signals (§15.2a, §15.7) that get the same soft treatment:
+ * never journaled against a real action, just a warn-shaped note for the
+ * Mini App journal so an admin can see why verification was forced. */
+function logJoinSignal(chatId: number, message: Message, member: User, reason: string): Promise<void> {
+  return addJournalEntry({
+    id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+    chatId,
+    messageId: message.message_id,
+    userId: member.id,
+    username: member.username ?? null,
+    displayName: displayName(member),
+    text: "",
+    category: "spam",
+    reason,
+    action: "warn",
+    escalated: false,
+    timestamp: Date.now(),
+    restored: false,
+  }).catch(() => {});
+}
 
 export function getBot(): Bot {
   if (_bot) return _bot;
@@ -297,6 +322,7 @@ export function getBot(): Bot {
             }
 
             await incrementActivity(chat.id, "joins").catch(() => {});
+            await recordJoinedGroup(member.id, chat.id).catch(() => {});
             if (settings.restrictNewMembersEnabled) {
               await markNewMemberRestricted(chat.id, member.id, settings.restrictNewMembersMinutes).catch(() => {});
             }
@@ -314,30 +340,36 @@ export function getBot(): Bot {
             // safety, not a Pro perk (see §15.1's "don't paywall core safety").
             const isImpersonator = await isLikelyAdminImpersonation(chat.id, member).catch(() => false);
             if (isImpersonator) {
-              await addJournalEntry({
-                id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
-                chatId: chat.id,
-                messageId: message.message_id,
-                userId: member.id,
-                username: member.username ?? null,
-                displayName: displayName(member),
-                text: "",
-                category: "spam",
-                reason: "похоже на имперсонацию администратора",
-                action: "warn",
-                escalated: false,
-                timestamp: Date.now(),
-                restored: false,
-              }).catch(() => {});
+              await logJoinSignal(chat.id, message, member, "похоже на имперсонацию администратора");
+            }
+
+            // §15.7 B2 MVP: cheapest form of "shared_group" graph detection —
+            // this account joined several of the bot's groups within the last
+            // hour. Correlational only (§6.5), so same treatment as
+            // isImpersonator: force verification + journal note + a
+            // reputation bump, never an automatic ban.
+            //
+            // Only checked when the member joined THEMSELVES (message.from is
+            // the member, not someone else) — an admin adding their moderator
+            // to several of their own groups in a row is the same shape
+            // (one account, several joins, short window) but is the normal,
+            // legitimate onboarding flow, not a spam/network pattern. Gating
+            // on who performed the join, not the joining account, tells the
+            // two apart without needing the full admin-overlap graph.
+            const selfJoined = message.from?.id === member.id;
+            const isNetworkJoin = selfJoined ? await isSuspiciousJoinVelocity(member.id).catch(() => false) : false;
+            if (isNetworkJoin) {
+              await logJoinSignal(chat.id, message, member, "частые вступления в разные группы подряд");
+              await recordReputationHit(chat.id, member.id).catch(() => {});
             }
 
             // "rules" is a free type (§15.3) — doesn't need `eligible` the way
-            // button/math do. A raid or an impersonation match forces
-            // VERIFICATION specifically (proving non-bot-ness), so it always
-            // uses "button" even when the group's configured type is "rules" —
-            // an "I agree to the rules" click doesn't prove that.
+            // button/math do. A raid, impersonation, or network-join match
+            // forces VERIFICATION specifically (proving non-bot-ness), so it
+            // always uses "button" even when the group's configured type is
+            // "rules" — an "I agree to the rules" click doesn't prove that.
             const captchaGateEligible = settings.captchaType === "rules" || eligible;
-            const forced = isRaid || isImpersonator;
+            const forced = isRaid || isImpersonator || isNetworkJoin;
             if ((settings.captchaEnabled && captchaGateEligible) || forced) {
               await startCaptcha(ctx.api, chat.id, member, settings.lang, {
                 type: forced && settings.captchaType === "rules" ? "button" : settings.captchaType,
@@ -394,7 +426,13 @@ export function getBot(): Bot {
     const verdict = await moderateMessage(message, settings, { isEdit });
     if (!verdict) return;
 
-    await applyViolation(ctx.api, message, settings, verdict);
+    const sideEffectsAfterVerdict = [applyViolation(ctx.api, message, settings, verdict)];
+    // One hit per finalized verdict, not per detector — see reputation.ts.
+    // Excludes night mode's blanket restriction (countsTowardReputation: false).
+    if (verdict.countsTowardReputation !== false) {
+      sideEffectsAfterVerdict.push(recordReputationHit(chat.id, from.id).catch(() => {}));
+    }
+    await Promise.all(sideEffectsAfterVerdict);
   });
 
   bot.catch((err) => {

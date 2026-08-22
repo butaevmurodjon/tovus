@@ -1114,6 +1114,7 @@ PATCH /api/miniapp/groups/{id} (if-match)              — оптимистич�
 | M4 | Кросс-групповая рассылка для админов (переиспользует federation.ts + broadcast.ts) | `lib/telegram/federation.ts`, `lib/telegram/broadcast.ts`, новый `.../broadcast/route.ts`, новая `app/group/[groupId]/broadcast/page.tsx` | ✅ сделано |
 | M3 | Vote-ban с апелляцией, настраиваемый порог (`voteBanThreshold`) | `lib/telegram/voteban.ts` (новый), `lib/telegram/violations.ts`, `lib/telegram/bot.ts`, `lib/telegram/commands.ts`, `lib/db/types.ts`, `page.tsx` | ✅ сделано |
 | B1 MVP | Топ активных часов (UTC) в `stats/page.tsx`, реально Pro-gated (без PostgreSQL) | `lib/db/stats.ts`, `.../stats/route.ts`, `components/HourlyActivityChart.tsx` (новый), `stats/page.tsx` | ✅ сделано |
+| B2 MVP | Репутация (`rep:user`, снимает leniency у повторных нарушителей) + join-velocity как дешёвая версия `shared_group`-графа | `lib/moderation/reputation.ts` (новый), `lib/db/userGraph.ts` (новый), `lib/moderation/index.ts`, `lib/telegram/bot.ts` | ✅ сделано |
 
 Все — с тестами, `tsc`/`eslint`/`vitest` зелёные. Ниже — то, что осталось
 (medium-effort дифференциаторы и «крупные ставки» из исходного анализа).

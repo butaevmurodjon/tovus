@@ -523,6 +523,60 @@ DeepSeek не вызывается. Результат нельзя кеширо
   добавляется отдельным, отдельно согласованным коммитом после калибровки
   (release gates §11.4).
 
+#### Метрики shadow-лога (остаток микро-шага 5) — 2026-08 ✅ сделано
+- [x] `lib/db/shadowStats.ts`: агрегированные Redis-счётчики по дням
+      (`group:{chatId}:shadowstats:{date}`, тот же 90-дневный TTL и hash-per-day
+      формат, что и `stats.ts`) — `total`, `comparable`, зоны, `cmp_{zone}_{flag|noflag}`
+      3x2 cross-tab (не единый agree/stricter/looser счётчик — иначе не видно,
+      какая зона тянет расхождение), `reputation_only_trigger` (§4.5: пустой
+      список сигналов + score>=60 даёт zone!="ok" — не должно читаться как
+      расхождение по содержимому), гистограмма латенси (`lat_lt10..lat_ge250`)
+      как proxy для p50/p95.
+- [x] Ограниченный список расхождений `group:{chatId}:shadowdiv` (LPUSH+LTRIM
+      300, как `journal:*` из §7) — `messageId`/`score`/`zone`/`oldCategory`/
+      `signals[].name+weight`, без raw text/username/userId (§11.4). Это и есть
+      «выгрузка расхождений» из критерия готовности шага 5 — без messageId
+      ручная разметка 200 сообщений (§11.4) невозможна.
+- [x] Запись — один pipelined round-trip (`recordShadowScoring`), вызывается
+      из `runShadowScoring` и обёрнут в `.catch(() => {})`, как и чтение
+      репутации. Латенси измеряется только вокруг работы скорера (collection +
+      один Redis-read репутации + scoring), не вокруг самой записи метрик.
+- [x] `scripts/shadow-report.ts` (`npm run shadow-report`, читает `DAYS`/`CHAT_ID`/
+      `FORMAT` из env) — текстовый и JSON-отчёт: доли зон, agree/stricter/looser,
+      `reputation_only_trigger`, latency p50/p95 proxy, список расхождений для
+      ручной разметки. Добавлен `tsx` в devDependencies. Сознательно не Mini
+      App — это шаг 15 (§11.3), не шаг 5; отчёт не трогает никакой Mini
+      App/owner-API поверхности.
+- [x] Тесты: `shadowStats.test.ts` (15) — классификация расхождений, границы
+      гистограммы латенси, деривация agree/stricter/looser из cross-tab,
+      percentile-прокси; `scoring.test.ts` +3 на `isReputationOnlyTrigger`.
+
+**Всё ещё отложено**: baseline p50/p95 и ручная разметка ≥200 сообщений
+(§11.4) сами по себе не сделаны этим коммитом — инструмент для их сбора
+теперь есть, но нужен реальный shadow-трафик за несколько дней, прежде чем
+числа из `shadow-report` можно использовать как основание для калибровки
+весов или для §11.4's gate перед `on`.
+
+**Найдено ревью и исправлено до коммита:**
+- `runShadowScoring` не проверял `isEdit` — каждое редактирование сообщения
+  заново скорилось и заново писало метрики/сэмпл под тем же `messageId`,
+  раздувая `total` и засоряя выборку для ручной разметки дублями. Теперь
+  принимает `{ isEdit }` и выходит рано, как и флуд-счётчики в `index.ts`.
+- `bot.ts` реально ожидал (`await`) `runShadowScoring` в пути ответа вебхука
+  — прямое противоречие докстрингу `scoring.ts` («never awaits it into the
+  response path»), и после добавления записи метрик это стало настоящей
+  задержкой на каждое сообщение при `shadow`/`on`. Заменено на `after()` из
+  `next/server` — гарантированно доработает после отправки ответа, не
+  блокируя его.
+- Гейт `if (!settings.antispam) return;` обнулял shadow-покрытие для всего
+  чата, если `restrictNewMembersEnabled` — единственный активный путь
+  реального пайплайна (он не зависит от `antispam`, см. `index.ts`).
+  Исправлено на `if (!settings.antispam && !settings.restrictNewMembersEnabled) return;`.
+- `extractLinks`/`hostnameOf`/`findMaskedLinkHost`/`findDangerousFileTag`/
+  `containsCta`/`countMentions` дублировались между `spam.ts` и `scoring.ts`
+  побайтово — вынесены в `lib/moderation/textSignals.ts`, оба файла теперь
+  импортируют оттуда.
+
 ---
 
 ## 5. Этап 2 — Нечёткий поиск и расстояние Левенштейна

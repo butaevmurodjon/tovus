@@ -1,17 +1,18 @@
-import type { Message, MessageEntity } from "grammy/types";
+import type { Message } from "grammy/types";
 import type { GroupSettings, ViolationCategory } from "@/lib/db/types";
 import type { ModerationSource } from "./index";
+import { DOMAIN_BLACKLIST, LINK_COUNT_THRESHOLD, MENTION_COUNT_THRESHOLD, SCAM_PATTERNS } from "./spamDict";
 import {
-  CTA_PHRASES,
-  DANGEROUS_FILE_EXTENSIONS,
-  DANGEROUS_MIME_TYPES,
-  DOMAIN_BLACKLIST,
-  LINK_COUNT_THRESHOLD,
-  MENTION_COUNT_THRESHOLD,
-  SCAM_PATTERNS,
-} from "./spamDict";
+  containsCta,
+  countMentions,
+  extractLinks,
+  findDangerousFileTag,
+  findMaskedLinkHost,
+  hostnameOf,
+} from "./textSignals";
 import { isNightModeActive } from "./nightMode";
 import { getReputationScore } from "./reputation";
+import { classifyDivergence, recordShadowScoring, type DivergenceSample } from "@/lib/db/shadowStats";
 
 // §4 Этап 1 — shadow-only scoring engine. Deliberately scoped down from the
 // full §4 pipeline for this first commit (see the reasoning below and in the
@@ -64,62 +65,10 @@ function zoneFor(score: number): Zone {
 // signal instead of stopping at the first, so two independent facts (e.g. a
 // blacklisted domain AND mass mentions) both show up in the evidence list —
 // §4.11's "only the group max counts toward the sum" is applied in
-// scoreSignals below, not here.
-
-function extractLinks(text: string, entities: MessageEntity[] | undefined): string[] {
-  const links: string[] = [];
-  for (const entity of entities ?? []) {
-    if (entity.type === "text_link" && entity.url) links.push(entity.url);
-    else if (entity.type === "url") links.push(text.slice(entity.offset, entity.offset + entity.length));
-  }
-  if (links.length === 0) {
-    const urlRegex = /(https?:\/\/|t\.me\/|www\.)[^\s]+/gi;
-    for (const match of text.matchAll(urlRegex)) links.push(match[0]);
-  }
-  return Array.from(new Set(links.map((l) => l.toLowerCase())));
-}
-
-function hostnameOf(link: string): string | null {
-  try {
-    const withProto = link.startsWith("http") ? link : `https://${link}`;
-    return new URL(withProto).hostname.replace(/^www\./, "").toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-const VISIBLE_URL_PATTERN = /^(https?:\/\/)?(www\.)?[a-z0-9-]+\.[a-z]{2,}(\/|$)/i;
-
-function findMaskedLinkHost(text: string, entities: MessageEntity[] | undefined): string | null {
-  for (const entity of entities ?? []) {
-    if (entity.type !== "text_link" || !entity.url) continue;
-    const visible = text.slice(entity.offset, entity.offset + entity.length).trim();
-    if (!VISIBLE_URL_PATTERN.test(visible)) continue;
-    const visibleHost = hostnameOf(visible);
-    const actualHost = hostnameOf(entity.url);
-    if (visibleHost && actualHost && visibleHost !== actualHost) return actualHost;
-  }
-  return null;
-}
-
-function findDangerousFileTag(message: Message): string | null {
-  const doc = message.document;
-  if (!doc) return null;
-  const name = doc.file_name?.toLowerCase() ?? "";
-  const ext = name.match(/\.([a-z0-9]+)$/)?.[1];
-  if (ext && DANGEROUS_FILE_EXTENSIONS.includes(ext)) return `.${ext}`;
-  if (doc.mime_type && DANGEROUS_MIME_TYPES.includes(doc.mime_type.toLowerCase())) return doc.mime_type;
-  return null;
-}
-
-function containsCta(text: string): boolean {
-  const lower = text.toLowerCase();
-  return CTA_PHRASES.some((phrase) => lower.includes(phrase));
-}
-
-function countMentions(entities: MessageEntity[] | undefined): number {
-  return (entities ?? []).filter((e) => e.type === "mention" || e.type === "text_mention").length;
-}
+// scoreSignals below, not here. The underlying pure text/entity helpers
+// (extractLinks, hostnameOf, findMaskedLinkHost, findDangerousFileTag,
+// containsCta, countMentions) live in ./textSignals, shared with spam.ts, so
+// the two detectors can't silently drift apart on link/CTA/file logic.
 
 /** Collects every spam-related signal that matches, with §4.4's weights. Pure
  * function of the message — no Redis, safe to call unconditionally. */
@@ -214,6 +163,15 @@ export function scoreSignals(signals: Signal[], reputationScore: number): ScoreR
   return { score, zone: zoneFor(score), signals };
 }
 
+/** True when the reputation modifier alone pushed the zone above "ok" — an
+ * empty signal list still scores 21 ("warn") once reputationScore >= 60 (see
+ * scoreSignals above). Tracked separately in the shadow metrics so a spike in
+ * repeat offenders doesn't get misread as "the scorer is over-triggering on
+ * content" (it isn't looking at content at all in that case). */
+export function isReputationOnlyTrigger(signals: Signal[], zone: Zone): boolean {
+  return signals.length === 0 && zone !== "ok";
+}
+
 // --- Shadow orchestration ----------------------------------------------------
 
 interface ShadowLogEntry {
@@ -231,6 +189,8 @@ interface ShadowLogEntry {
   score: number;
   zone: Zone;
   signals: { name: string; weight: number }[];
+  divergence: "agree" | "stricter" | "looser" | null;
+  latencyMs: number;
 }
 
 const MODELED_SOURCE: ModerationSource = "spam-detector";
@@ -257,37 +217,80 @@ const MODELED_SOURCE: ModerationSource = "spam-detector";
 export async function runShadowScoring(
   message: Message,
   settings: GroupSettings,
-  oldVerdict: { category: ViolationCategory; source?: ModerationSource } | null
+  oldVerdict: { category: ViolationCategory; source?: ModerationSource } | null,
+  options: { isEdit?: boolean } = {}
 ): Promise<void> {
   if (moderationV2Mode() === "off") return;
+  // Same reasoning as index.ts's flood counters (§4's own checkUserFlood
+  // guard): an edit isn't a new message event. Without this, re-scoring every
+  // edit under the same messageId inflates the shadow-stats "total" and can
+  // push several divergenceSample entries for one edited message into the
+  // 300-slot buffer, corrupting both the counters and the hand-labeling
+  // export (§11.4) — found in review, not in the original commit.
+  if (options.isEdit) return;
   // Every message gets forced through during quiet hours regardless of
   // content (see moderation/index.ts) — scoring it would just log a
   // content-based divergence that has nothing to do with why the old
   // pipeline actually acted. Skipping keeps the shadow sample meaningful,
   // at the cost of under-representing night-hours traffic.
   if (isNightModeActive(settings)) return;
-  // Matches the real pipeline's own gate — comparing "would the scorer have
-  // flagged this" only makes sense where the old pipeline was actually
-  // looking for spam at all.
-  if (!settings.antispam) return;
+  // Matches the real pipeline's own gates: content is only ever looked at
+  // when antispam OR restrictNewMembersEnabled is on (restricted-content
+  // fires independently of antispam, see index.ts). Skipping only when BOTH
+  // are off — skipping on antispam alone would silently zero out shadow
+  // coverage for a whole chat that still has real moderation happening via
+  // the new-member restriction path.
+  if (!settings.antispam && !settings.restrictNewMembersEnabled) return;
 
   const userId = message.from?.id;
   if (!userId) return;
 
+  // Measures only the scorer's own work — collection + the one reputation
+  // read + scoring — not the metrics write below, so this is a proxy for
+  // what "on" mode would actually cost (§2's p95 ≤250ms budget), not for
+  // shadow mode's own (strictly larger) overhead.
+  const startedAt = performance.now();
   const signals = collectSpamSignals(message);
   const reputationScore = await getReputationScore(settings.chatId, userId).catch(() => 0);
   const result = scoreSignals(signals, reputationScore);
+  const latencyMs = performance.now() - startedAt;
+
+  const oldCategory = oldVerdict?.category ?? null;
+  const comparable = oldVerdict === null || oldVerdict.source === MODELED_SOURCE;
+  const divergence = classifyDivergence(comparable, oldCategory, result.zone);
+  const namedSignals = result.signals.map((s) => ({ name: s.name, weight: s.weight }));
 
   const entry: ShadowLogEntry = {
     chatId: settings.chatId,
     messageId: message.message_id,
-    oldCategory: oldVerdict?.category ?? null,
-    comparable: oldVerdict === null || oldVerdict.source === MODELED_SOURCE,
+    oldCategory,
+    comparable,
     score: result.score,
     zone: result.zone,
     // Never log free-text evidence (§11.4: no raw text/username/user ID in
     // metrics) — name+weight is enough to see which detectors fired.
-    signals: result.signals.map((s) => ({ name: s.name, weight: s.weight })),
+    signals: namedSignals,
+    divergence,
+    latencyMs: Math.round(latencyMs),
   };
   console.log("[moderation_v2_shadow]", JSON.stringify(entry));
+
+  // Skip when there's nothing to hand-label: an empty signal list (the
+  // reputation-floor-only case, tracked separately above) would otherwise
+  // flood the 300-slot sample with content-free entries from a handful of
+  // chatty repeat offenders, evicting the content divergences §11.4's
+  // hand-labeling actually needs.
+  const divergenceSample: DivergenceSample | null =
+    divergence && divergence !== "agree" && signals.length > 0
+      ? { messageId: message.message_id, score: result.score, zone: result.zone, oldCategory, divergence, signals: namedSignals }
+      : null;
+
+  await recordShadowScoring(settings.chatId, {
+    zone: result.zone,
+    latencyMs,
+    comparable,
+    oldCategory,
+    reputationOnlyTrigger: isReputationOnlyTrigger(signals, result.zone),
+    divergenceSample,
+  }).catch(() => {});
 }

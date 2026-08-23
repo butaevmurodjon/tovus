@@ -1,14 +1,36 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "grammy/types";
-import { collectSpamSignals, moderationV2Mode, scoreSignals } from "./scoring";
+import { DEFAULT_GROUP_SETTINGS, type GroupSettings } from "@/lib/db/types";
+import { collectSpamSignals, isReputationOnlyTrigger, moderationV2Mode, runShadowScoring, scoreSignals } from "./scoring";
+
+// runShadowScoring's gating tests below exercise real code past the Redis
+// boundary — stub the two Redis-touching calls so the tests assert on
+// gating logic, not on network behavior (no live Upstash creds in CI/local).
+vi.mock("./reputation", () => ({ getReputationScore: vi.fn().mockResolvedValue(0) }));
+vi.mock("@/lib/db/shadowStats", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/db/shadowStats")>();
+  return { ...actual, recordShadowScoring: vi.fn().mockResolvedValue(undefined) };
+});
 
 function msg(overrides: Partial<Message> = {}): Message {
   return {
     message_id: 1,
     date: 0,
     chat: { id: -1, type: "supergroup" } as Message["chat"],
+    from: { id: 42, is_bot: false, first_name: "x" } as Message["from"],
     ...overrides,
   } as Message;
+}
+
+function groupSettings(overrides: Partial<GroupSettings> = {}): GroupSettings {
+  return {
+    chatId: -1,
+    title: "test",
+    createdAt: 0,
+    lang: "ru",
+    ...DEFAULT_GROUP_SETTINGS,
+    ...overrides,
+  };
 }
 
 describe("moderationV2Mode", () => {
@@ -155,5 +177,56 @@ describe("scoreSignals", () => {
     expect(scoreSignals([{ name: "dangerous_file", weight: 100, evidence: "x", group: "link-risk" }], 0).zone).toBe(
       "escalate"
     );
+  });
+});
+
+describe("isReputationOnlyTrigger", () => {
+  it("is true when reputation alone pushed an empty-signal message out of the ok zone", () => {
+    const result = scoreSignals([], 60);
+    expect(isReputationOnlyTrigger([], result.zone)).toBe(true);
+  });
+
+  it("is false when content signals are present, even alongside the reputation modifier", () => {
+    const signals = [{ name: "cta_alone", weight: 20, evidence: "cta" } as const];
+    const result = scoreSignals(signals, 60);
+    expect(isReputationOnlyTrigger(signals, result.zone)).toBe(false);
+  });
+
+  it("is false for an empty signal list that stays in the ok zone", () => {
+    expect(isReputationOnlyTrigger([], "ok")).toBe(false);
+  });
+});
+
+describe("runShadowScoring gating (regression: found in review)", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    process.env.MODERATION_V2 = "shadow";
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    delete process.env.MODERATION_V2;
+    logSpy.mockRestore();
+  });
+
+  it("skips edits entirely — an edit must not re-score or re-log the same message", async () => {
+    await runShadowScoring(msg(), groupSettings(), null, { isEdit: true });
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+
+  it("skips a chat where both antispam and restrictNewMembersEnabled are off", async () => {
+    await runShadowScoring(msg(), groupSettings({ antispam: false, restrictNewMembersEnabled: false }), null);
+    expect(logSpy).not.toHaveBeenCalled();
+  });
+
+  it("still scores when antispam is off but restrictNewMembersEnabled is on (real pipeline still moderates via restricted-content)", async () => {
+    await runShadowScoring(msg(), groupSettings({ antispam: false, restrictNewMembersEnabled: true }), null);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("still scores a plain antispam-only chat (unchanged behavior)", async () => {
+    await runShadowScoring(msg(), groupSettings({ antispam: true, restrictNewMembersEnabled: false }), null);
+    expect(logSpy).toHaveBeenCalledTimes(1);
   });
 });

@@ -3,7 +3,7 @@ import type { StatsBucket, ViolationCategory } from "./types";
 
 const STATS_TTL_SECONDS = 60 * 60 * 24 * 90; // 90 days
 
-function dateKey(date: Date): string {
+export function dateKey(date: Date): string {
   return date.toISOString().slice(0, 10); // YYYY-MM-DD (UTC)
 }
 
@@ -17,7 +17,7 @@ export async function incrementStat(chatId: number, category: ViolationCategory)
   await redis.expire(key, STATS_TTL_SECONDS);
 }
 
-function lastNDates(n: number): string[] {
+export function lastNDates(n: number): string[] {
   const dates: string[] = [];
   const now = new Date();
   for (let i = 0; i < n; i++) {

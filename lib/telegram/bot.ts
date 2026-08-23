@@ -1,4 +1,5 @@
 import { Bot, webhookCallback } from "grammy";
+import { after } from "next/server";
 import type { Message, User } from "grammy/types";
 import { getGroupSettings, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
 import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
@@ -439,11 +440,14 @@ export function getBot(): Bot {
 
     const verdict = await moderateMessage(message, settings, { isEdit });
     // §4 Этап 1, shadow-only: computed and logged after the real verdict is
-    // already final, never allowed to affect it (see scoring.ts). Awaited
-    // (not truly fire-and-forget) so it isn't killed mid-flight when the
-    // webhook response is sent — off-mode short-circuits before any Redis
-    // call, so this is a no-op until MODERATION_V2 is actually set.
-    await runShadowScoring(message, settings, verdict).catch(() => {});
+    // already final, never allowed to affect it (see scoring.ts). Scheduled
+    // via Next's after() rather than awaited, so it truly doesn't add to the
+    // webhook response latency (found in review: this used to be awaited
+    // directly here, contradicting scoring.ts's own docstring) while still
+    // being guaranteed to run to completion instead of getting killed
+    // mid-flight once the response is sent. off-mode short-circuits before
+    // any Redis call, so this is a no-op until MODERATION_V2 is actually set.
+    after(() => runShadowScoring(message, settings, verdict, { isEdit }).catch(() => {}));
     if (!verdict) return;
 
     const sideEffectsAfterVerdict = [applyViolation(ctx.api, message, settings, verdict)];

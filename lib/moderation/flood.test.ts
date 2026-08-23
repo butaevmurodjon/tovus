@@ -7,9 +7,16 @@ vi.mock("@upstash/redis", () => ({
   Redis: { fromEnv: () => fake },
 }));
 
-const { checkDuplicateFlood, checkRaid, checkUserFlood, consumeNewMemberFlag, markNewMember } = await import(
-  "./flood"
-);
+const {
+  checkDuplicateFlood,
+  checkRaid,
+  checkUserFlood,
+  consumeNewMemberFlag,
+  isWithinNewMemberWindow,
+  markNewMember,
+  peekDuplicateFloodCount,
+  peekUserFloodCount,
+} = await import("./flood");
 
 describe("consumeNewMemberFlag (TZ.md §9.1, G2)", () => {
   it("returns false when the member was never marked", async () => {
@@ -54,5 +61,45 @@ describe("checkUserFlood / checkDuplicateFlood / checkRaid", () => {
       expect(await checkRaid(chatId)).toBe(false);
     }
     expect(await checkRaid(chatId)).toBe(true);
+  });
+});
+
+describe("peekUserFloodCount / peekDuplicateFloodCount (read-only, for scoring.ts)", () => {
+  it("reflects the current count without incrementing it", async () => {
+    const chatId = -103;
+    const userId = 20;
+    await checkUserFlood(chatId, userId);
+    await checkUserFlood(chatId, userId);
+    expect(await peekUserFloodCount(chatId, userId)).toBe(2);
+    // A second peek must not bump the count further.
+    expect(await peekUserFloodCount(chatId, userId)).toBe(2);
+  });
+
+  it("returns 0 for a user/text never seen", async () => {
+    expect(await peekUserFloodCount(-104, 999)).toBe(0);
+    expect(await peekDuplicateFloodCount(-104, "never seen before, long enough")).toBe(0);
+  });
+
+  it("peekDuplicateFloodCount ignores short text like checkDuplicateFlood does", async () => {
+    expect(await peekDuplicateFloodCount(-105, "short")).toBe(0);
+  });
+});
+
+describe("isWithinNewMemberWindow (read-only, for scoring.ts's new-account modifier)", () => {
+  it("is false for a member never marked", async () => {
+    expect(await isWithinNewMemberWindow(-1, 999)).toBe(false);
+  });
+
+  it("is true after markNewMember and stays true across repeated checks (unlike consumeNewMemberFlag)", async () => {
+    await markNewMember(-1, 3);
+    expect(await isWithinNewMemberWindow(-1, 3)).toBe(true);
+    expect(await isWithinNewMemberWindow(-1, 3)).toBe(true);
+  });
+
+  it("stays true even after the one-shot flag has been consumed — the two keys are independent", async () => {
+    await markNewMember(-1, 4);
+    expect(await consumeNewMemberFlag(-1, 4)).toBe(true);
+    expect(await consumeNewMemberFlag(-1, 4)).toBe(false);
+    expect(await isWithinNewMemberWindow(-1, 4)).toBe(true);
   });
 });

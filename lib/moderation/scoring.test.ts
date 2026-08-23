@@ -4,9 +4,16 @@ import { DEFAULT_GROUP_SETTINGS, type GroupSettings } from "@/lib/db/types";
 import { collectSpamSignals, isReputationOnlyTrigger, moderationV2Mode, runShadowScoring, scoreSignals } from "./scoring";
 
 // runShadowScoring's gating tests below exercise real code past the Redis
-// boundary — stub the two Redis-touching calls so the tests assert on
-// gating logic, not on network behavior (no live Upstash creds in CI/local).
+// boundary — stub every Redis-touching call so the tests assert on gating
+// logic, not on network behavior (no live Upstash creds in CI/local; an
+// unmocked call here previously turned this file's run time from ~200ms to
+// ~9s waiting on failed fetches, one per test).
 vi.mock("./reputation", () => ({ getReputationScore: vi.fn().mockResolvedValue(0) }));
+vi.mock("./flood", () => ({
+  peekUserFloodCount: vi.fn().mockResolvedValue(0),
+  peekDuplicateFloodCount: vi.fn().mockResolvedValue(0),
+  isWithinNewMemberWindow: vi.fn().mockResolvedValue(false),
+}));
 vi.mock("@/lib/db/shadowStats", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/db/shadowStats")>();
   return { ...actual, recordShadowScoring: vi.fn().mockResolvedValue(undefined) };
@@ -178,6 +185,33 @@ describe("scoreSignals", () => {
       "escalate"
     );
   });
+
+  it("defaults isNewAccount to false — existing two-arg call sites are unaffected", () => {
+    expect(scoreSignals([{ name: "cta_alone", weight: 20, evidence: "cta" }], 0).score).toBe(20);
+  });
+
+  it("adds a flat +10 for a new account, on top of content signals", () => {
+    const result = scoreSignals([{ name: "cta_alone", weight: 20, evidence: "cta" }], 0, true);
+    expect(result.score).toBe(30);
+    expect(result.zone).toBe("warn");
+  });
+
+  it("still adds +10 even when the reputation>=60 floor already forced warn (never silently swallowed)", () => {
+    const withoutNewAccount = scoreSignals([], 60, false);
+    const withNewAccount = scoreSignals([], 60, true);
+    expect(withoutNewAccount.score).toBe(21);
+    expect(withNewAccount.score).toBe(31);
+  });
+
+  it("composes with the reputation>=30 tier (both are additive)", () => {
+    const result = scoreSignals([{ name: "cta_alone", weight: 20, evidence: "cta" }], 30, true);
+    expect(result.score).toBe(20 + 20 + 10);
+  });
+
+  it("the +10 new-account modifier is still clamped to 100, not pushed past it", () => {
+    const result = scoreSignals([{ name: "dangerous_file", weight: 100, evidence: ".exe", group: "link-risk" }], 0, true);
+    expect(result.score).toBe(100);
+  });
 });
 
 describe("isReputationOnlyTrigger", () => {
@@ -228,5 +262,64 @@ describe("runShadowScoring gating (regression: found in review)", () => {
   it("still scores a plain antispam-only chat (unchanged behavior)", async () => {
     await runShadowScoring(msg(), groupSettings({ antispam: true, restrictNewMembersEnabled: false }), null);
     expect(logSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runShadowScoring flood/new-account wiring", () => {
+  let logSpy: ReturnType<typeof vi.spyOn>;
+
+  function loggedEntry(): { score: number; zone: string; signals: { name: string; weight: number }[] } {
+    const [, json] = logSpy.mock.calls[0] as [string, string];
+    return JSON.parse(json);
+  }
+
+  beforeEach(async () => {
+    process.env.MODERATION_V2 = "shadow";
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const flood = await import("./flood");
+    vi.mocked(flood.peekUserFloodCount).mockResolvedValue(0);
+    vi.mocked(flood.peekDuplicateFloodCount).mockResolvedValue(0);
+    vi.mocked(flood.isWithinNewMemberWindow).mockResolvedValue(false);
+  });
+
+  afterEach(() => {
+    delete process.env.MODERATION_V2;
+    logSpy.mockRestore();
+  });
+
+  it("adds a user_flood signal once the peeked count crosses FLOOD_MAX_MESSAGES", async () => {
+    const flood = await import("./flood");
+    vi.mocked(flood.peekUserFloodCount).mockResolvedValue(999);
+    await runShadowScoring(msg(), groupSettings(), null);
+    expect(loggedEntry().signals).toContainEqual({ name: "user_flood", weight: 50 });
+  });
+
+  it("does not add user_flood when the peeked count is at or below the threshold", async () => {
+    const flood = await import("./flood");
+    vi.mocked(flood.peekUserFloodCount).mockResolvedValue(1);
+    await runShadowScoring(msg(), groupSettings(), null);
+    expect(loggedEntry().signals).not.toContainEqual(expect.objectContaining({ name: "user_flood" }));
+  });
+
+  it("adds a duplicate_flood signal once the peeked count crosses DUPLICATE_MAX_COUNT", async () => {
+    const flood = await import("./flood");
+    vi.mocked(flood.peekDuplicateFloodCount).mockResolvedValue(999);
+    await runShadowScoring(msg({ text: "hello there" }), groupSettings(), null);
+    expect(loggedEntry().signals).toContainEqual({ name: "duplicate_flood", weight: 60 });
+  });
+
+  it("applies the +10 new-account modifier when isWithinNewMemberWindow is true", async () => {
+    const flood = await import("./flood");
+    vi.mocked(flood.isWithinNewMemberWindow).mockResolvedValue(true);
+    await runShadowScoring(msg({ text: "hello there" }), groupSettings(), null);
+    expect(loggedEntry().score).toBe(10);
+    expect(loggedEntry().zone).toBe("ok");
+  });
+
+  it("a Redis failure on any of the four reads fails open (0 / false), never rejects", async () => {
+    const flood = await import("./flood");
+    vi.mocked(flood.peekUserFloodCount).mockRejectedValue(new Error("boom"));
+    await expect(runShadowScoring(msg(), groupSettings(), null)).resolves.toBeUndefined();
+    expect(loggedEntry().signals).not.toContainEqual(expect.objectContaining({ name: "user_flood" }));
   });
 });

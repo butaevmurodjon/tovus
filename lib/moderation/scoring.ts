@@ -1,7 +1,14 @@
 import type { Message } from "grammy/types";
 import type { GroupSettings, ViolationCategory } from "@/lib/db/types";
 import type { ModerationSource } from "./index";
-import { DOMAIN_BLACKLIST, LINK_COUNT_THRESHOLD, MENTION_COUNT_THRESHOLD, SCAM_PATTERNS } from "./spamDict";
+import {
+  DOMAIN_BLACKLIST,
+  DUPLICATE_MAX_COUNT,
+  FLOOD_MAX_MESSAGES,
+  LINK_COUNT_THRESHOLD,
+  MENTION_COUNT_THRESHOLD,
+  SCAM_PATTERNS,
+} from "./spamDict";
 import {
   containsCta,
   countMentions,
@@ -12,6 +19,7 @@ import {
 } from "./textSignals";
 import { isNightModeActive } from "./nightMode";
 import { getReputationScore } from "./reputation";
+import { isWithinNewMemberWindow, peekDuplicateFloodCount, peekUserFloodCount } from "./flood";
 import { classifyDivergence, recordShadowScoring, type DivergenceSample } from "@/lib/db/shadowStats";
 
 // §4 Этап 1 — shadow-only scoring engine. Deliberately scoped down from the
@@ -147,7 +155,12 @@ export function collectSpamSignals(message: Message): Signal[] {
  * (they're evidence of the same underlying risk, not independent facts), all
  * other signals are additive, then the reputation modifier is applied and the
  * total clamped to 0..100. */
-export function scoreSignals(signals: Signal[], reputationScore: number): ScoreResult {
+// §4.4: flat modifier for a chat-userbase account under 7 days old, applied
+// on top of everything else — see the isNewAccount handling in scoreSignals
+// for why it's added last rather than folded into the signal sum.
+const NEW_ACCOUNT_MODIFIER = 10;
+
+export function scoreSignals(signals: Signal[], reputationScore: number, isNewAccount = false): ScoreResult {
   const groupMax = Math.max(0, ...signals.filter((s) => s.group === "link-risk").map((s) => s.weight));
   const additive = signals.filter((s) => s.group !== "link-risk").reduce((sum, s) => sum + s.weight, 0);
 
@@ -159,15 +172,26 @@ export function scoreSignals(signals: Signal[], reputationScore: number): ScoreR
   if (reputationScore >= 60) score = Math.max(score, ZONE_OK_MAX + 1);
   else if (reputationScore >= 30) score += 20;
 
+  // Added after the reputation floor/tier above, not folded into the additive
+  // sum before it: applying it earlier risks the score>=60 floor's Math.max
+  // silently swallowing it (0 signals + isNewAccount alone would score 10,
+  // then the floor still forces 21 regardless — the +10 would have no
+  // effect at all for that user). Applying it last guarantees it always
+  // moves the score, matching "flat +10 modifier" in §4.4's table.
+  if (isNewAccount) score += NEW_ACCOUNT_MODIFIER;
+
   score = Math.min(100, Math.max(0, score));
   return { score, zone: zoneFor(score), signals };
 }
 
-/** True when the reputation modifier alone pushed the zone above "ok" — an
- * empty signal list still scores 21 ("warn") once reputationScore >= 60 (see
- * scoreSignals above). Tracked separately in the shadow metrics so a spike in
- * repeat offenders doesn't get misread as "the scorer is over-triggering on
- * content" (it isn't looking at content at all in that case). */
+/** True when no message-content signal fired and the zone is still above
+ * "ok" — meaning a modifier (reputation floor/tier, or the new-account
+ * +10) did all the work. An empty signal list still scores 21 ("warn") once
+ * reputationScore >= 60, or 30 ("warn") at reputationScore >= 30 combined
+ * with isNewAccount (see scoreSignals above). Tracked separately in the
+ * shadow metrics so a spike in repeat offenders or new joins doesn't get
+ * misread as "the scorer is over-triggering on content" (it isn't looking
+ * at content at all in that case). */
 export function isReputationOnlyTrigger(signals: Signal[], zone: Zone): boolean {
   return signals.length === 0 && zone !== "ok";
 }
@@ -201,17 +225,20 @@ const MODELED_SOURCE: ModerationSource = "spam-detector";
  * bot.ts, after the real verdict is already final; awaited but wrapped in
  * .catch() there so a failure here can never surface as a moderation error.
  *
- * Deliberately out of scope for this first commit (see TZ.md §4 checklist):
- *  - flood/duplicate-flood signals (checkUserFlood/checkDuplicateFlood are
- *    INCR-based reads — calling them here would double-count every message
- *    toward the real flood threshold);
- *  - the "new account (<7d)" modifier (would need consumeNewMemberFlag, a
- *    one-shot GET→DEL already consumed by the real pipeline);
+ * Flood/duplicate-flood signals and the new-account modifier (§4.4/§4.5) read
+ * flood.ts's peekUserFloodCount/peekDuplicateFloodCount/isWithinNewMemberWindow
+ * — read-only, never the mutating checkUserFlood/checkDuplicateFlood/
+ * consumeNewMemberFlag the real pipeline uses, so nothing here double-counts
+ * toward a real threshold. See those functions' docstrings for the
+ * staleness caveat this implies (the flood peeks especially under-fire on
+ * messages the old spam-detector already flagged).
+ *
+ * Still deliberately out of scope (see TZ.md §4 checklist / §11.3):
  *  - DeepSeek as a scoring signal (§4.6) — rewiring classifyWithDeepseek's
  *    trigger condition touches the live premium-tier path, which is exactly
  *    what shadow mode exists to avoid touching first;
  *  - §5's fuzzy-duplicate signal — §5 doesn't exist yet.
- * All of these are safe to add later, incrementally, once this baseline is
+ * Both are safe to add later, incrementally, once this baseline is
  * validated — see §11.3 for the intended order.
  */
 export async function runShadowScoring(
@@ -245,14 +272,34 @@ export async function runShadowScoring(
   const userId = message.from?.id;
   if (!userId) return;
 
-  // Measures only the scorer's own work — collection + the one reputation
-  // read + scoring — not the metrics write below, so this is a proxy for
-  // what "on" mode would actually cost (§2's p95 ≤250ms budget), not for
-  // shadow mode's own (strictly larger) overhead.
+  // Measures only the scorer's own work — collection + these reads +
+  // scoring — not the metrics write below, so this is a proxy for what "on"
+  // mode would actually cost (§2's p95 ≤250ms budget), not for shadow mode's
+  // own (strictly larger) overhead.
   const startedAt = performance.now();
   const signals = collectSpamSignals(message);
-  const reputationScore = await getReputationScore(settings.chatId, userId).catch(() => 0);
-  const result = scoreSignals(signals, reputationScore);
+  const text = message.text ?? message.caption ?? "";
+  // Promise.all rather than a single Redis pipeline: these four reads cross
+  // three modules (reputation.ts, flood.ts x3), and reaching into their key
+  // builders to batch one HTTP round trip isn't worth breaking that
+  // encapsulation for — this still dispatches all four concurrently instead
+  // of serially.
+  const [reputationScore, userFloodCount, dupFloodCount, isNewAccount] = await Promise.all([
+    getReputationScore(settings.chatId, userId).catch(() => 0),
+    peekUserFloodCount(settings.chatId, userId).catch(() => 0),
+    peekDuplicateFloodCount(settings.chatId, text).catch(() => 0),
+    isWithinNewMemberWindow(settings.chatId, userId).catch(() => false),
+  ]);
+  // §4.4: flat weights when the real pipeline's own trip conditions
+  // (checkUserFlood/checkDuplicateFlood) would have fired, mirrored exactly
+  // so the shadow number means the same thing the real threshold does.
+  if (userFloodCount > FLOOD_MAX_MESSAGES) {
+    signals.push({ name: "user_flood", weight: 50, evidence: `${userFloodCount} messages` });
+  }
+  if (dupFloodCount > DUPLICATE_MAX_COUNT) {
+    signals.push({ name: "duplicate_flood", weight: 60, evidence: `${dupFloodCount} repeats` });
+  }
+  const result = scoreSignals(signals, reputationScore, isNewAccount);
   const latencyMs = performance.now() - startedAt;
 
   const oldCategory = oldVerdict?.category ?? null;

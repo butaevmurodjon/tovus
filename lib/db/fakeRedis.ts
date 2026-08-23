@@ -17,6 +17,11 @@ function delayed<T>(value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), 0));
 }
 
+interface PipelineChain {
+  set(key: string, value: number, opts?: { ex?: number }): PipelineChain;
+  exec(): Promise<unknown[]>;
+}
+
 // TZ.md §9.1 G5's shape only (INCR + conditional EXPIRE) — this is not a Lua
 // interpreter, just enough to simulate the one script incrWithTtl sends.
 // eval() below ignores the actual script text it's given, so these tests pin
@@ -50,6 +55,31 @@ export class FakeRedis {
     this.store.set(key, value);
     if (opts?.ex) this.ttls.set(key, opts.ex);
     return delayed("OK");
+  }
+
+  async exists(key: string): Promise<number> {
+    return delayed(this.store.has(key) ? 1 : 0);
+  }
+
+  /** Only the subset used by this repo's callers (markNewMember's two SETs):
+   * queues plain synchronous mutations, applied in call order on .exec(),
+   * same one-round-trip-per-pipeline contract as the real client. */
+  pipeline() {
+    const ops: Array<() => unknown> = [];
+    const enqueue = <T>(op: () => T): PipelineChain => {
+      ops.push(op);
+      return chain;
+    };
+    const chain: PipelineChain = {
+      set: (key: string, value: number, opts?: { ex?: number }) =>
+        enqueue(() => {
+          this.store.set(key, value);
+          if (opts?.ex) this.ttls.set(key, opts.ex);
+          return "OK";
+        }),
+      exec: async () => delayed(ops.map((op) => op())),
+    };
+    return chain;
   }
 
   /** Mirrors INCR_WITH_TTL_SCRIPT's `count == 1 or TTL == -1` self-heal

@@ -16,19 +16,39 @@ function hashText(text: string): string {
   return hash.toString(36);
 }
 
+const userFloodKey = (chatId: number, userId: number) => `flood:user:${chatId}:${userId}`;
+const dupFloodKey = (chatId: number, text: string) => `flood:dup:${chatId}:${hashText(text.trim().toLowerCase())}`;
+
 /** Same user posting many messages in a short window. */
 export async function checkUserFlood(chatId: number, userId: number): Promise<boolean> {
-  const key = `flood:user:${chatId}:${userId}`;
-  const count = await incrWithTtl(key, FLOOD_WINDOW_SECONDS);
+  const count = await incrWithTtl(userFloodKey(chatId, userId), FLOOD_WINDOW_SECONDS);
   return count > FLOOD_MAX_MESSAGES;
 }
 
 /** Same (near-)identical text repeated across the group — mass-forward / bot raid signal. */
 export async function checkDuplicateFlood(chatId: number, text: string): Promise<boolean> {
   if (!text || text.trim().length < 8) return false;
-  const key = `flood:dup:${chatId}:${hashText(text.trim().toLowerCase())}`;
-  const count = await incrWithTtl(key, DUPLICATE_WINDOW_SECONDS);
+  const count = await incrWithTtl(dupFloodKey(chatId, text), DUPLICATE_WINDOW_SECONDS);
   return count > DUPLICATE_MAX_COUNT;
+}
+
+/** Read-only GET, never increments — for the §4 shadow scorer (scoring.ts),
+ * which must not double-count toward the real flood threshold by calling
+ * checkUserFlood again. Only reflects this exact message if the real
+ * pipeline actually incremented the counter for it (antispam on, not an
+ * edit, and detectSpam found nothing — see index.ts's gating); otherwise
+ * this reads a stale prior count. That means the flood signal below
+ * systematically under-fires on messages the old spam-detector already
+ * flagged, which is exactly the population most likely to disagree with the
+ * new scorer — read shadow-report's divergence numbers with that in mind. */
+export async function peekUserFloodCount(chatId: number, userId: number): Promise<number> {
+  return (await getRedis().get<number>(userFloodKey(chatId, userId))) ?? 0;
+}
+
+/** Read-only counterpart to peekUserFloodCount, same staleness caveat. */
+export async function peekDuplicateFloodCount(chatId: number, text: string): Promise<number> {
+  if (!text || text.trim().length < 8) return 0;
+  return (await getRedis().get<number>(dupFloodKey(chatId, text))) ?? 0;
 }
 
 /**
@@ -49,10 +69,34 @@ export async function checkRaid(chatId: number): Promise<boolean> {
 const NEW_MEMBER_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 const newMemberKey = (chatId: number, userId: number) => `newmember:${chatId}:${userId}`;
+// Separate from newMemberKey on purpose: that one is one-shot (deleted by
+// consumeNewMemberFlag on the member's very first message), so by the time
+// the §4 shadow scorer runs — after the real pipeline, every message — it's
+// often already gone. §4.4/§4.5's "new account (<7 days)" modifier needs to
+// be checkable on every message across the whole window, not just the
+// first, so it gets its own key that's only ever read (isWithinNewMemberWindow),
+// never consumed. Same TTL/window as the one-shot flag.
+const newMemberWindowKey = (chatId: number, userId: number) => `newmember:window:${chatId}:${userId}`;
 
+/** Members who joined before this shipped only have the old one-shot key —
+ * they'll read isWithinNewMemberWindow === false for the rest of their
+ * window (up to 7 days post-deploy), so the shadow scorer's +10 modifier
+ * under-fires for that population until it backfills naturally. Not a bug,
+ * just a startup transient worth knowing about when reading early
+ * shadow-report numbers. */
 export async function markNewMember(chatId: number, userId: number): Promise<void> {
   const redis = getRedis();
-  await redis.set(newMemberKey(chatId, userId), 1, { ex: NEW_MEMBER_TTL_SECONDS });
+  const pipeline = redis.pipeline();
+  pipeline.set(newMemberKey(chatId, userId), 1, { ex: NEW_MEMBER_TTL_SECONDS });
+  pipeline.set(newMemberWindowKey(chatId, userId), 1, { ex: NEW_MEMBER_TTL_SECONDS });
+  await pipeline.exec();
+}
+
+/** Read-only, never consumed — unlike consumeNewMemberFlag below. For the §4
+ * shadow scorer's new-account modifier only; the real pipeline's own
+ * leniency still runs on the one-shot flag. */
+export async function isWithinNewMemberWindow(chatId: number, userId: number): Promise<boolean> {
+  return (await getRedis().exists(newMemberWindowKey(chatId, userId))) === 1;
 }
 
 /** Reads AND clears the flag — only literally the member's first processed

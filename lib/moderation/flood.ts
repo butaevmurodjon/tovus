@@ -1,4 +1,4 @@
-import { getRedis } from "@/lib/db/redis";
+import { getRedis, incrWithTtl } from "@/lib/db/redis";
 import {
   DUPLICATE_MAX_COUNT,
   DUPLICATE_WINDOW_SECONDS,
@@ -18,20 +18,16 @@ function hashText(text: string): string {
 
 /** Same user posting many messages in a short window. */
 export async function checkUserFlood(chatId: number, userId: number): Promise<boolean> {
-  const redis = getRedis();
   const key = `flood:user:${chatId}:${userId}`;
-  const count = await redis.incr(key);
-  if (count === 1) await redis.expire(key, FLOOD_WINDOW_SECONDS);
+  const count = await incrWithTtl(key, FLOOD_WINDOW_SECONDS);
   return count > FLOOD_MAX_MESSAGES;
 }
 
 /** Same (near-)identical text repeated across the group — mass-forward / bot raid signal. */
 export async function checkDuplicateFlood(chatId: number, text: string): Promise<boolean> {
   if (!text || text.trim().length < 8) return false;
-  const redis = getRedis();
   const key = `flood:dup:${chatId}:${hashText(text.trim().toLowerCase())}`;
-  const count = await redis.incr(key);
-  if (count === 1) await redis.expire(key, DUPLICATE_WINDOW_SECONDS);
+  const count = await incrWithTtl(key, DUPLICATE_WINDOW_SECONDS);
   return count > DUPLICATE_MAX_COUNT;
 }
 
@@ -42,10 +38,8 @@ export async function checkDuplicateFlood(chatId: number, text: string): Promise
  * every member of the burst (not just the one that tipped it over) gets flagged.
  */
 export async function checkRaid(chatId: number): Promise<boolean> {
-  const redis = getRedis();
   const key = `raid:${chatId}`;
-  const count = await redis.incr(key);
-  if (count === 1) await redis.expire(key, RAID_WINDOW_SECONDS);
+  const count = await incrWithTtl(key, RAID_WINDOW_SECONDS);
   return count >= RAID_JOIN_THRESHOLD;
 }
 
@@ -61,12 +55,17 @@ export async function markNewMember(chatId: number, userId: number): Promise<voi
   await redis.set(newMemberKey(chatId, userId), 1, { ex: NEW_MEMBER_TTL_SECONDS });
 }
 
-/** Reads AND clears the flag — only literally the member's first processed message gets it. */
+/** Reads AND clears the flag — only literally the member's first processed
+ * message gets it. GETDEL rather than GET-then-DEL (TZ.md §9.1, G2): two
+ * messages from a brand-new member processed concurrently used to both read
+ * the flag before either deleted it, so both could get the first-message
+ * leniency instead of exactly one. */
 export async function consumeNewMemberFlag(chatId: number, userId: number): Promise<boolean> {
-  const redis = getRedis();
-  const key = newMemberKey(chatId, userId);
-  const value = await redis.get(key);
-  if (value === null) return false;
-  await redis.del(key);
-  return true;
+  const value = await getRedis().getdel<number>(newMemberKey(chatId, userId));
+  // Loose equality on purpose: a miss deserializes to `null` (verified against
+  // @upstash/redis's parseResponse — a nil REST reply round-trips through
+  // JSON.parse(null) to JS null, not undefined), but a live-path inversion
+  // here (every never-marked member reading as "first message") is severe
+  // enough that guarding the unlikely `undefined` case too costs nothing.
+  return value != null;
 }

@@ -990,23 +990,41 @@ CREATE TABLE payments (
 
 | Гонка | Решение | Файл |
 |---|---|---|
-| TOCTOU в квоте Groq (GET→INCR) | `INCRBY` сначала, проверка результата, `DECRBY` при отказе | `groq.ts` |
+| TOCTOU в квоте AI-модерации (GET→INCR) | `INCRBY` сначала, проверка результата, `DECRBY` при отказе | `deepseek.ts` (было `groq.ts` до замены Groq → DeepSeek) |
 | Двойная эскалация варнов при параллельных нарушениях | Lua-скрипт (prune+add+expire+count атомарно) | `warns.ts` |
 | Overshoot лимита custom-слов при батче | Lua-скрипт (SCARD→SADD цикл атомарно) | `customWords.ts` |
 | Сдвиг индексов журнала при параллельном LPUSH | Hash по id + ZSet порядка | `journal.ts` |
 | Каскады antiraid/warnLimit | Чистая логика + тесты | `groups.ts` |
+| G2: `consumeNewMemberFlag` GET→DEL (2026-08) | `GETDEL` — один атомарный round-trip | `flood.ts` |
+| G5: `INCR`→`EXPIRE` без атомарности во флуд/рейд-счётчиках (2026-08) | Lua `incrWithTtl` (INCR + условный EXPIRE атомарно) | `lib/db/redis.ts`, `flood.ts` |
 
 **Оставшиеся (цель Этапа 6):**
 
 | # | Гонка | Сценарий | Решение |
 |---|---|---|---|
 | G1 | `updateGroupSettings` read-modify-write | Два параллельных PATCH (два тумблера) или PATCH + `successful_payment` — последний писатель затирает чужие поля | Атомарный патч: Lua-скрипт `HSET`/`JSON.SET` по полям + optimistic версия, либо перейти на точечные поля (см. 9.2) |
-| G2 | `consumeNewMemberFlag` GET→DEL | Два параллельных сообщения от новичка — оба читают флаг до удаления | Lua: `if EXISTS then DEL return 1 else return 0` |
 | G3 | Cache stampede `memberCount` | N параллельных миссов одновременно зовут `getChatMemberCount` | single-flight лок `SET NX EX` (§7.3) |
 | G4 | Cache stampede `cas` | То же для CAS | single-flight |
-| G5 | `INCR`→`EXPIRE` без атомарности (флуд/рейд/статистика/Groq-счётчики) | Падение между вызовами → ключ без TTL | Lua-скрипт `incr_with_ttl` (общий helper) |
 | G6 | Двойной старт капчи/рейда из-за дублей вебхука | Telegram иногда шлёт дубликаты update | Дедупликация по `update_id` (Redis SETNX с TTL) |
 | G7 | `pollForProActivation` гонка с вебхуком | Уже решена polling+backoff; усилить: сверять `planExpiresAt` из ответа сервера, а не только `isProActive` | точечно |
+
+G2 и G5 сделаны (2026-08, см. таблицу «уже решённые» выше) — но G5 закрыт только для
+флуд/рейд-счётчиков (`checkUserFlood`/`checkDuplicateFlood`/`checkRaid`), которые блокировали
+shadow-сигналы Этапа 1. **Проверено ревью (unscoped grep по `lib/`) — G5 остаётся открытым и
+в других местах, следующая строка была неточной до исправления:**
+- `lib/db/stats.ts` (`incrementStat`/`incrementActivity`/`incrementHourlyActivity`) — `hincrby`+`expire`
+  раздельно; утечка TTL на статистике, не баг модерации.
+- `lib/moderation/deepseek.ts` (строки ~33-34 квота по сообщениям, ~56-57 квота по токенам,
+  `incrby`+`expire` с условием `next === tokens`) — это и есть «Groq-счётчик» из старой записи
+  в таблице «уже решённые» (Groq заменён на DeepSeek, TOCTOU-фикс там — про другую гонку,
+  GET→INCR quota-check, не про INCR→EXPIRE; **не решено**, ошибочно считалось решённым).
+- `lib/telegram/broadcast.ts:68-69` и `lib/telegram/voteban.ts:44` — тот же паттерн
+  (`incr`/`sadd`+условный `expire`).
+
+`incrWithTtl` в `lib/db/redis.ts` сейчас работает только с `INCR` (флуд/рейд); перевод
+`stats.ts`/`voteban.ts` потребует `hincrby`/`sadd`-вариант скрипта, `deepseek.ts` — вариант
+с `incrby` и условием `next === amount` вместо `count === 1`. Все три — отдельный follow-up,
+не в этом коммите (никакой из них не блокирует Этап 1's shadow-сигналы).
 
 ### 9.2 Решение G1 — атомарный патч настроек
 Вариант A (рекомендуемый): перейти на **полевую запись** — каждое поле

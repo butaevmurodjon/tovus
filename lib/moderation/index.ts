@@ -61,8 +61,12 @@ export async function moderateMessage(
   }
 
   // Consumed once per message so the softer treatment covers exactly the member's
-  // first message, not a rolling time window.
-  const isFirstMessage = userId ? await consumeNewMemberFlag(chatId, userId) : false;
+  // first message, not a rolling time window. Fail open toward "not their first
+  // message" (no leniency) on any Redis error, same direction as isRepeatOffender
+  // below — losing the leniency is strictly the safer/stricter outcome, unlike an
+  // uncaught throw here, which (moderateMessage is awaited outside any try/catch
+  // in bot.ts) would abort the whole handler before applyViolation ever runs.
+  const isFirstMessage = userId ? await consumeNewMemberFlag(chatId, userId).catch(() => false) : false;
 
   // §4.5 / §15.7 B2 MVP: a proven repeat offender in THIS chat loses the
   // benefit-of-the-doubt leniency (forceWarnOnly) below — never a stronger

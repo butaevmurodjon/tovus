@@ -10,6 +10,20 @@ import { detectRestrictedContent, isNewMemberRestricted } from "./newMemberGuard
 import { isNightModeActive } from "./nightMode";
 import { isRepeatOffender } from "./reputation";
 
+/** §4.9: which detector produced the verdict — purely additive metadata, never
+ * read by applyViolation/reputation.ts. Exists so the §4 shadow scorer
+ * (scoring.ts) can tell "the old pipeline didn't model this detector at all"
+ * (flood, profanity, premium-ai, restricted-content, night-mode) apart from
+ * "the old pipeline looked for spam and found nothing" — `category: "spam"`
+ * alone can't distinguish detectSpam from flood from restricted-content. */
+export type ModerationSource =
+  | "night-mode"
+  | "restricted-content"
+  | "profanity"
+  | "spam-detector"
+  | "flood"
+  | "premium-ai";
+
 export interface ModerationVerdict {
   category: ViolationCategory;
   reason: string;
@@ -19,6 +33,7 @@ export interface ModerationVerdict {
    * every member regardless of content, so it isn't evidence of bad behavior
    * and must not feed reputation.ts — everything else defaults true. */
   countsTowardReputation?: boolean;
+  source?: ModerationSource;
 }
 
 export async function moderateMessage(
@@ -41,6 +56,7 @@ export async function moderateMessage(
       reason: "тихий час: сообщения от участников ограничены",
       forceWarnOnly: true,
       countsTowardReputation: false,
+      source: "night-mode",
     };
   }
 
@@ -74,7 +90,7 @@ export async function moderateMessage(
   if (settings.restrictNewMembersEnabled && userId && (await isNewMemberRestricted(chatId, userId))) {
     const reason = detectRestrictedContent(message);
     if (reason) {
-      return { category: "spam", reason, forceWarnOnly: !isKnownRepeatOffender };
+      return { category: "spam", reason, forceWarnOnly: !isKnownRepeatOffender, source: "restricted-content" };
     }
   }
 
@@ -83,7 +99,7 @@ export async function moderateMessage(
     const result = detectProfanity(text, customWords);
     if (result.matched) {
       const reason = result.source === "custom" ? "запрещённое слово (добавлено вручную)" : "нецензурная лексика";
-      return { category: "profanity", reason, forceWarnOnly: false };
+      return { category: "profanity", reason, forceWarnOnly: false, source: "profanity" };
     }
   }
 
@@ -91,7 +107,7 @@ export async function moderateMessage(
     const spamResult = detectSpam(message);
     if (spamResult.matched) {
       const forceWarnOnly = isFirstMessage && spamResult.severity === "low" && !isKnownRepeatOffender;
-      return { category: "spam", reason: spamResult.reason ?? "спам", forceWarnOnly };
+      return { category: "spam", reason: spamResult.reason ?? "спам", forceWarnOnly, source: "spam-detector" };
     }
 
     // Flood counters model the RATE of message events, not their content — an
@@ -107,10 +123,15 @@ export async function moderateMessage(
         text ? checkDuplicateFlood(chatId, text) : Promise.resolve(false),
       ]);
       if (userFlood) {
-        return { category: "spam", reason: "флуд: слишком много сообщений подряд", forceWarnOnly: false };
+        return {
+          category: "spam",
+          reason: "флуд: слишком много сообщений подряд",
+          forceWarnOnly: false,
+          source: "flood",
+        };
       }
       if (dupFlood) {
-        return { category: "spam", reason: "флуд: повторяющееся сообщение", forceWarnOnly: false };
+        return { category: "spam", reason: "флуд: повторяющееся сообщение", forceWarnOnly: false, source: "flood" };
       }
     }
   }
@@ -130,6 +151,7 @@ export async function moderateMessage(
         category: "premium",
         reason: verdict.reason || fallbackReason,
         forceWarnOnly,
+        source: "premium-ai",
       };
     }
   }

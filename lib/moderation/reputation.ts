@@ -44,6 +44,14 @@ export async function resetReputation(chatId: number, userId: number): Promise<v
   await getRedis().del(repKey(chatId, userId));
 }
 
+/** Read-only, no side effect (plain HGET) — safe to call from the §4 shadow
+ * scorer (scoring.ts) alongside the real pipeline without double-counting
+ * anything, unlike the flood/new-member counters which mutate on read. */
+export async function getReputationScore(chatId: number, userId: number): Promise<number> {
+  const score = await getRedis().hget<number>(repKey(chatId, userId), "score");
+  return score ?? 0;
+}
+
 /** Fail-open by construction: callers only ever get `true` on a confirmed
  * read past the threshold — any Redis error/miss reads as "not a repeat
  * offender", never as an excuse to punish harder. */

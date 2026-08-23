@@ -13,6 +13,7 @@ import { isCasBanned } from "@/lib/moderation/cas";
 import { markNewMemberRestricted } from "@/lib/moderation/newMemberGuard";
 import { isLikelyAdminImpersonation } from "@/lib/moderation/impersonation";
 import { recordReputationHit } from "@/lib/moderation/reputation";
+import { runShadowScoring } from "@/lib/moderation/scoring";
 import { isSuspiciousJoinVelocity, recordJoinedGroup } from "@/lib/db/userGraph";
 import { addJournalEntry } from "@/lib/db/journal";
 import { detectLang, t } from "@/lib/i18n";
@@ -437,6 +438,12 @@ export function getBot(): Bot {
     if (admin || whitelisted) return;
 
     const verdict = await moderateMessage(message, settings, { isEdit });
+    // §4 Этап 1, shadow-only: computed and logged after the real verdict is
+    // already final, never allowed to affect it (see scoring.ts). Awaited
+    // (not truly fire-and-forget) so it isn't killed mid-flight when the
+    // webhook response is sent — off-mode short-circuits before any Redis
+    // call, so this is a no-op until MODERATION_V2 is actually set.
+    await runShadowScoring(message, settings, verdict).catch(() => {});
     if (!verdict) return;
 
     const sideEffectsAfterVerdict = [applyViolation(ctx.api, message, settings, verdict)];

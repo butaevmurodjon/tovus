@@ -2,6 +2,7 @@ import type { Api } from "grammy";
 import { listAllGroupIds } from "@/lib/db/groups";
 import { addGlobalBanEntry, removeGlobalBanEntry } from "@/lib/db/globalBan";
 import type { GlobalBanEntry } from "@/lib/db/types";
+import { deleteLastMessage } from "./messageCleanup";
 
 /**
  * Bans a user in every group the bot currently manages and records the ban so
@@ -24,7 +25,11 @@ export async function banUserEverywhere(
     chatIds.map((chatId) =>
       api
         .banChatMember(chatId, userId)
-        .then(() => true)
+        .then(async () => {
+          // Best-effort, never blocks the ban result on a delete failing.
+          await deleteLastMessage(api, chatId, userId);
+          return true;
+        })
         .catch(() => false)
     )
   );

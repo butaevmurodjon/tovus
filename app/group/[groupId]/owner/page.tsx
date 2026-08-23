@@ -8,7 +8,7 @@ import { Button } from "@/components/Button";
 import { confirmAction, haptic, hapticNotify } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
 
-type Action = "delete" | "ban";
+type Action = "delete" | "ban" | "resetrep";
 
 function errorText(error: unknown): string {
   if (!(error instanceof ApiError)) return "Не удалось выполнить действие. Попробуйте ещё раз.";
@@ -34,6 +34,7 @@ export default function GroupOwnerPage() {
   const { chatId, settings } = useGroup();
   const [messageId, setMessageId] = useState("");
   const [userId, setUserId] = useState("");
+  const [repUserId, setRepUserId] = useState("");
   const [busy, setBusy] = useState<Action | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -43,7 +44,7 @@ export default function GroupOwnerPage() {
   }
 
   async function run(action: Action) {
-    const raw = action === "delete" ? messageId : userId;
+    const raw = action === "delete" ? messageId : action === "ban" ? userId : repUserId;
     const value = Number(raw.trim());
     if (!Number.isInteger(value) || value <= 0) {
       flash(action === "delete" ? "Введите корректный ID сообщения." : "Введите корректный ID пользователя.");
@@ -52,20 +53,24 @@ export default function GroupOwnerPage() {
     const question =
       action === "delete"
         ? `Удалить сообщение №${value} в группе «${settings?.title ?? chatId}»?`
-        : `Заблокировать пользователя ${value} в группе «${settings?.title ?? chatId}»?`;
+        : action === "ban"
+          ? `Заблокировать пользователя ${value} в группе «${settings?.title ?? chatId}»?`
+          : `Сбросить репутацию пользователя ${value} в группе «${settings?.title ?? chatId}»?`;
     if (!(await confirmAction(question))) return;
 
     haptic(action === "ban" ? "medium" : "light");
     setBusy(action);
     try {
-      await fetcher(`/api/miniapp/owner/groups/${chatId}/${action}`, {
+      const endpoint = action === "resetrep" ? "resetrep" : action;
+      await fetcher(`/api/miniapp/owner/groups/${chatId}/${endpoint}`, {
         method: "POST",
         body: JSON.stringify(action === "delete" ? { messageId: value } : { userId: value }),
       });
       if (action === "delete") setMessageId("");
-      else setUserId("");
+      else if (action === "ban") setUserId("");
+      else setRepUserId("");
       hapticNotify("success");
-      flash(action === "delete" ? "Сообщение удалено." : "Пользователь заблокирован.");
+      flash(action === "delete" ? "Сообщение удалено." : action === "ban" ? "Пользователь заблокирован." : "Репутация сброшена.");
     } catch (error) {
       hapticNotify("error");
       flash(errorText(error));
@@ -135,6 +140,29 @@ export default function GroupOwnerPage() {
             />
             <Button variant="danger" onClick={() => run("ban")} disabled={busy !== null}>
               {busy === "ban" ? "Блокируем…" : "Забанить"}
+            </Button>
+          </div>
+        </CardSection>
+      </Card>
+
+      <Card>
+        <CardSection title="Сбросить репутацию">
+          <p className="text-[12px] mb-3" style={{ color: "var(--ink-muted)" }}>
+            Обнуляет счётчик репутации пользователя в этой группе — например, если он накопился из-за ложных срабатываний фильтра.
+          </p>
+          <div className="flex gap-2">
+            <input
+              inputMode="numeric"
+              type="text"
+              value={repUserId}
+              onChange={(event) => setRepUserId(event.target.value)}
+              placeholder="ID пользователя"
+              aria-label="ID пользователя"
+              className="min-w-0 flex-1 rounded-[var(--radius-sm)] border px-3 py-2 text-[14px]"
+              style={{ borderColor: "var(--border-strong)", background: "var(--surface-sunken)" }}
+            />
+            <Button variant="secondary" onClick={() => run("resetrep")} disabled={busy !== null}>
+              {busy === "resetrep" ? "Сбрасываем…" : "Сбросить"}
             </Button>
           </div>
         </CardSection>

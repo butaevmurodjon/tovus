@@ -5,6 +5,7 @@ import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } fro
 import { incrementActivity, incrementHourlyActivity, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { isGloballyBanned } from "@/lib/db/globalBan";
+import { recordMessage } from "@/lib/db/messageAuthors";
 import { canUseProFeature, formatPlanDate } from "@/lib/billing/plan";
 import { moderateMessage } from "@/lib/moderation";
 import { checkRaid, markNewMember } from "@/lib/moderation/flood";
@@ -401,6 +402,18 @@ export function getBot(): Bot {
     if (!isEdit) {
       sideEffects.push(incrementActivity(chat.id, "messages").catch(() => {}));
       sideEffects.push(incrementHourlyActivity(chat.id).catch(() => {}));
+      // Ahead of the admin/whitelist return below — the owner's link/username
+      // tool and "teach the AI from this message" need this for every sender,
+      // admins included, not just messages that go through moderation.
+      sideEffects.push(
+        recordMessage(
+          chat.id,
+          from.id,
+          message.message_id,
+          message.text ?? message.caption ?? "",
+          from.username
+        ).catch(() => {})
+      );
     }
     await Promise.all(sideEffects);
 

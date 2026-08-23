@@ -3,6 +3,7 @@ import { authenticateRequest } from "@/lib/telegram/miniAppAuth";
 import { getApi } from "@/lib/telegram/api";
 import { isOwner } from "@/lib/owner";
 import { authorizeOwnerAction, ownerActionErrorStatus } from "@/lib/telegram/ownerActions";
+import { deleteLastMessage } from "@/lib/telegram/messageCleanup";
 
 export const runtime = "nodejs";
 
@@ -33,6 +34,7 @@ export async function POST(
 
   try {
     await api.banChatMember(chatId, userId);
+    await deleteLastMessage(api, chatId, userId);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("Manual owner ban failed:", err);

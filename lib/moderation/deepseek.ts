@@ -1,5 +1,6 @@
 import { getRedis } from "@/lib/db/redis";
 import { fetchWithTimeout } from "@/lib/http";
+import { listAiRules } from "@/lib/db/aiRules";
 
 const API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-chat";
@@ -34,9 +35,12 @@ async function withinCounterBudget(key: string, ttlSeconds: number, max: number)
   return count <= max;
 }
 
-/** Approximate token count (~4 chars/token) so the TPM/TPD guards don't need a real tokenizer. */
-function estimateTokens(text: string): number {
-  return Math.ceil((SYSTEM_PROMPT.length + text.length) / 4) + COMPLETION_TOKEN_BUDGET;
+/** Approximate token count (~4 chars/token) so the TPM/TPD guards don't need a
+ * real tokenizer. Takes the actual system prompt used for this call (not the
+ * base SYSTEM_PROMPT constant) since owner-defined rules (see
+ * buildSystemPrompt) can make it materially longer. */
+function estimateTokens(systemPrompt: string, text: string): number {
+  return Math.ceil((systemPrompt.length + text.length) / 4) + COMPLETION_TOKEN_BUDGET;
 }
 
 /**
@@ -59,8 +63,8 @@ async function withinTokenBudget(key: string, ttlSeconds: number, max: number, t
 }
 
 /** All budgets must clear before we spend a DeepSeek call; any one exhausted -> silent fallback. */
-async function withinRateBudget(pool: QuotaPool, text: string): Promise<boolean> {
-  const tokens = estimateTokens(text);
+async function withinRateBudget(pool: QuotaPool, systemPrompt: string, text: string): Promise<boolean> {
+  const tokens = estimateTokens(systemPrompt, text);
   const b = BUDGETS[pool];
   const [rpm, rpd, tpm, tpd] = await Promise.all([
     withinCounterBudget(`deepseek:${pool}:rpm`, 60, b.rpm),
@@ -86,6 +90,23 @@ Decide if a message is advertising/spam (unsolicited ads, "DM me" recruitment, m
 Respond ONLY with compact JSON: {"violation": boolean, "category": "spam"|"profanity"|"scam"|"none", "reason": string}.
 "reason" must be a short phrase in Russian, e.g. "реклама заработка" or "не является нарушением".
 Be conservative: normal conversation, jokes, and on-topic messages are NOT violations.`;
+
+/** Appends the owner's "teach the AI" rules (Mini App owner tools) to the base
+ * prompt, if any are set. Global across all groups — see lib/db/aiRules.ts.
+ * Fails open to the base prompt on any Redis error; a rules-fetch hiccup must
+ * never block moderation, just temporarily drop the custom rules for one call. */
+async function buildSystemPrompt(): Promise<string> {
+  const rules = await listAiRules().catch(() => []);
+  if (rules.length === 0) return SYSTEM_PROMPT;
+
+  const violations = rules.filter((r) => r.label === "violation").map((r) => `- ${r.text}`);
+  const allowed = rules.filter((r) => r.label === "allowed").map((r) => `- ${r.text}`);
+
+  let extra = "\n\nAdditional rules set by this bot's owner (apply these on top of the judgment above):";
+  if (violations.length > 0) extra += `\nTreat these as violations:\n${violations.join("\n")}`;
+  if (allowed.length > 0) extra += `\nDo NOT treat these as violations, even if they otherwise look borderline:\n${allowed.join("\n")}`;
+  return SYSTEM_PROMPT + extra;
+}
 
 interface DeepseekResponse {
   choices?: { message?: { content?: string } }[];
@@ -119,7 +140,8 @@ export function parseDeepseekContent(raw: string | undefined): DeepseekClassific
 export async function classifyWithDeepseek(text: string, pool: QuotaPool = "free"): Promise<DeepseekClassification | null> {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) return null;
-  if (!(await withinRateBudget(pool, text))) return null;
+  const systemPrompt = await buildSystemPrompt();
+  if (!(await withinRateBudget(pool, systemPrompt, text))) return null;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
@@ -137,7 +159,7 @@ export async function classifyWithDeepseek(text: string, pool: QuotaPool = "free
             max_tokens: COMPLETION_TOKEN_BUDGET,
             response_format: { type: "json_object" },
             messages: [
-              { role: "system", content: SYSTEM_PROMPT },
+              { role: "system", content: systemPrompt },
               { role: "user", content: text.slice(0, 2000) },
             ],
           }),

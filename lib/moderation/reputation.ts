@@ -36,6 +36,14 @@ export async function recordReputationHit(
   await redis.expire(key, REP_TTL_SECONDS);
 }
 
+/** Manual owner override — e.g. clearing a score inflated by a since-fixed
+ * false-positive detector (2026-08 profanity filter audit). Deleting the key
+ * outright rather than zeroing fields, so a stale firstSeen/hitCount doesn't
+ * linger either. */
+export async function resetReputation(chatId: number, userId: number): Promise<void> {
+  await getRedis().del(repKey(chatId, userId));
+}
+
 /** Fail-open by construction: callers only ever get `true` on a confirmed
  * read past the threshold — any Redis error/miss reads as "not a repeat
  * offender", never as an excuse to punish harder. */

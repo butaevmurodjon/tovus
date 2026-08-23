@@ -12,6 +12,7 @@ export function OwnerNav() {
     { href: "/owner", label: t("miniapp.ownerNavDashboard"), icon: "🛡" },
     { href: "/owner/bans", label: t("miniapp.ownerNavBans"), icon: "⛔" },
     { href: "/owner/broadcast", label: t("miniapp.ownerNavBroadcast"), icon: "📣" },
+    { href: "/owner/tools", label: t("miniapp.ownerNavTools"), icon: "🔧" },
   ];
 
   return (

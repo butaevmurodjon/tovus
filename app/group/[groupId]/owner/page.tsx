@@ -6,28 +6,9 @@ import { useGroup } from "@/contexts/GroupProvider";
 import { Card, CardSection } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { confirmAction, haptic, hapticNotify } from "@/lib/miniapp/telegram";
-import { ApiError } from "@/lib/miniapp/api";
+import { ownerActionErrorText } from "@/lib/miniapp/ownerActionErrorText";
 
 type Action = "delete" | "ban" | "resetrep";
-
-function errorText(error: unknown): string {
-  if (!(error instanceof ApiError)) return "Не удалось выполнить действие. Попробуйте ещё раз.";
-  switch (error.message) {
-    case "bot_not_admin":
-    case "group_unavailable":
-      return "Бот больше не подключён к этой группе или не является администратором.";
-    case "missing_delete_permission":
-      return "У бота нет права удалять сообщения в этой группе.";
-    case "missing_restrict_permission":
-      return "У бота нет права блокировать участников в этой группе.";
-    case "delete_failed":
-      return "Сообщение не удалось удалить. Проверьте его ID и права бота.";
-    case "ban_failed":
-      return "Пользователя не удалось заблокировать. Возможно, это администратор.";
-    default:
-      return "Не удалось выполнить действие. Попробуйте ещё раз.";
-  }
-}
 
 export default function GroupOwnerPage() {
   const { fetcher, isOwner } = useApp();
@@ -73,7 +54,7 @@ export default function GroupOwnerPage() {
       flash(action === "delete" ? "Сообщение удалено." : action === "ban" ? "Пользователь заблокирован." : "Репутация сброшена.");
     } catch (error) {
       hapticNotify("error");
-      flash(errorText(error));
+      flash(ownerActionErrorText(error));
     } finally {
       setBusy(null);
     }

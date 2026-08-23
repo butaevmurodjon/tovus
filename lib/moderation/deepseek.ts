@@ -91,12 +91,28 @@ Respond ONLY with compact JSON: {"violation": boolean, "category": "spam"|"profa
 "reason" must be a short phrase in Russian, e.g. "реклама заработка" or "не является нарушением".
 Be conservative: normal conversation, jokes, and on-topic messages are NOT violations.`;
 
+// Short in-memory cache so a burst of messages across every group doesn't
+// each pay a Redis hgetall just to build the same prompt — owner-edited
+// rules change rarely, and Fluid Compute commonly reuses the same instance
+// across nearby invocations. Worst case, a just-added rule takes up to this
+// long to apply everywhere; that's an acceptable trade for cutting Redis
+// calls on the hottest AI path.
+const AI_RULES_CACHE_TTL_MS = 30_000;
+let aiRulesCache: { rules: Awaited<ReturnType<typeof listAiRules>>; expiresAt: number } | null = null;
+
+async function getCachedAiRules(): Promise<Awaited<ReturnType<typeof listAiRules>>> {
+  if (aiRulesCache && aiRulesCache.expiresAt > Date.now()) return aiRulesCache.rules;
+  const rules = await listAiRules();
+  aiRulesCache = { rules, expiresAt: Date.now() + AI_RULES_CACHE_TTL_MS };
+  return rules;
+}
+
 /** Appends the owner's "teach the AI" rules (Mini App owner tools) to the base
  * prompt, if any are set. Global across all groups — see lib/db/aiRules.ts.
  * Fails open to the base prompt on any Redis error; a rules-fetch hiccup must
  * never block moderation, just temporarily drop the custom rules for one call. */
 async function buildSystemPrompt(): Promise<string> {
-  const rules = await listAiRules().catch(() => []);
+  const rules = await getCachedAiRules().catch(() => []);
   if (rules.length === 0) return SYSTEM_PROMPT;
 
   const violations = rules.filter((r) => r.label === "violation").map((r) => `- ${r.text}`);

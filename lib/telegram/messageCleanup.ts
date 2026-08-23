@@ -13,10 +13,16 @@ export async function deleteLastMessage(api: Api, chatId: number, userId: number
   try {
     const messageId = await getLastMessageId(chatId, userId);
     if (!messageId) return;
-    await api.deleteMessage(chatId, messageId).catch(() => {});
+    // Only clear the pointer once the delete actually landed — e.g. the bot
+    // has restrict but not delete rights in this group. Clearing it
+    // regardless would permanently lose the ability to retry once the bot
+    // is later granted delete rights (same discipline as the captcha sweep's
+    // "only clear the marker once the round trip fully succeeded").
+    await api.deleteMessage(chatId, messageId);
     await clearLastMessage(chatId, userId).catch(() => {});
   } catch {
-    // A Redis blip here must never look like the ban itself failed —
-    // callers (globalBan.ts especially) treat this as fully best-effort.
+    // A Redis blip or a Telegram error here must never look like the ban
+    // itself failed — callers (globalBan.ts especially) treat this as fully
+    // best-effort.
   }
 }

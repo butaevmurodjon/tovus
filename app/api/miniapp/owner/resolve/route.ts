@@ -37,8 +37,13 @@ export async function POST(req: Request) {
       try {
         const chat = await api.getChat(`@${link.chatRef}`);
         chatId = chat.id;
-      } catch {
-        return NextResponse.json({ error: "chat_not_found" }, { status: 404 });
+      } catch (err) {
+        // A real "no such chat" from Telegram is a GrammyError; anything else
+        // (network blip, Telegram 5xx, timeout) must not be reported the same
+        // way — the owner would otherwise wrongly conclude the bot isn't in
+        // the group and give up instead of retrying.
+        const status = err instanceof GrammyError ? 404 : 500;
+        return NextResponse.json({ error: status === 404 ? "chat_not_found" : "resolve_failed" }, { status });
       }
     }
     // Only ever reads cache for chats the bot actually manages — matches the
@@ -64,7 +69,16 @@ export async function POST(req: Request) {
     // hasn't cached (e.g. never posted, or cache expired).
     const cachedUserId = await resolveUsername(input);
     if (cachedUserId) {
-      return NextResponse.json({ type: "user", userId: cachedUserId, username: input.replace(/^@/, "") });
+      // Resolve by userId (reliable — the bot has definitely seen this
+      // account) rather than trusting the cached username mapping is still
+      // current: Telegram usernames can be released and re-claimed by a
+      // different account within the cache's 30-day TTL, and echoing back
+      // what the owner typed would silently paper over that mismatch.
+      const currentUsername = await api
+        .getChat(cachedUserId)
+        .then((c) => ("username" in c ? c.username ?? null : null))
+        .catch(() => null);
+      return NextResponse.json({ type: "user", userId: cachedUserId, username: currentUsername });
     }
     try {
       const chat = await api.getChat(input);

@@ -7,6 +7,7 @@ import { Button } from "@/components/Button";
 import { Badge } from "@/components/Badge";
 import { confirmAction, haptic, hapticNotify } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
+import { ownerActionErrorText } from "@/lib/miniapp/ownerActionErrorText";
 import type { AiRule, AiRuleLabel } from "@/lib/db/aiRules";
 
 type ResolveResult =
@@ -20,25 +21,13 @@ function resolveErrorText(error: unknown): string {
       return "Группа/канал по этой ссылке не найдены или бот туда не добавлен.";
     case "user_not_found":
       return "Пользователь с таким юзернеймом не найден.";
+    case "resolve_failed":
+      return "Telegram временно недоступен. Попробуйте ещё раз через момент.";
     default:
       return "Не удалось разобрать ввод. Проверьте ссылку или юзернейм.";
   }
 }
 
-function actionErrorText(error: unknown): string {
-  if (!(error instanceof ApiError)) return "Действие не удалось выполнить.";
-  switch (error.message) {
-    case "bot_not_admin":
-    case "group_unavailable":
-      return "Бот не подключён к этой группе или не администратор.";
-    case "missing_delete_permission":
-      return "У бота нет права удалять сообщения в этой группе.";
-    case "missing_restrict_permission":
-      return "У бота нет права блокировать участников в этой группе.";
-    default:
-      return "Действие не удалось выполнить.";
-  }
-}
 
 export default function OwnerToolsPage() {
   const { fetcher } = useApp();
@@ -53,7 +42,7 @@ export default function OwnerToolsPage() {
   const [input, setInput] = useState("");
   const [resolving, setResolving] = useState(false);
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
-  const [acting, setActing] = useState<"delete" | "ban" | "both" | null>(null);
+  const [acting, setActing] = useState<"delete" | "ban-group" | "ban-everywhere" | "ban-and-delete" | null>(null);
 
   async function resolve() {
     if (!input.trim()) return;
@@ -88,7 +77,7 @@ export default function OwnerToolsPage() {
       flash("Сообщение удалено.");
     } catch (error) {
       hapticNotify("error");
-      flash(actionErrorText(error));
+      flash(ownerActionErrorText(error));
     } finally {
       setActing(null);
     }
@@ -105,23 +94,37 @@ export default function OwnerToolsPage() {
       : `Заблокировать пользователя ${userId} в этой группе?`;
     if (!(await confirmAction(question))) return;
     haptic("medium");
-    setActing(alsoDelete ? "both" : "ban");
+    setActing(alsoDelete ? "ban-and-delete" : "ban-group");
     try {
       await fetcher(`/api/miniapp/owner/groups/${resolved.chatId}/ban`, {
         method: "POST",
         body: JSON.stringify({ userId }),
       });
+      let deleteFailed = false;
       if (alsoDelete) {
+        // The ban route above already best-effort deletes the author's last
+        // cached message server-side, which is often (but not always — the
+        // owner may have linked an older message) this same message. Track
+        // the outcome instead of swallowing it, so the toast doesn't claim a
+        // delete succeeded when it may genuinely have failed (permissions).
         await fetcher(`/api/miniapp/owner/groups/${resolved.chatId}/delete`, {
           method: "POST",
           body: JSON.stringify({ messageId: resolved.messageId }),
-        }).catch(() => {});
+        }).catch(() => {
+          deleteFailed = true;
+        });
       }
-      hapticNotify("success");
-      flash(alsoDelete ? "Пользователь забанен в группе, сообщение удалено." : "Пользователь забанен в группе.");
+      hapticNotify(deleteFailed ? "warning" : "success");
+      flash(
+        !alsoDelete
+          ? "Пользователь забанен в группе."
+          : deleteFailed
+            ? "Пользователь забанен, но сообщение удалить не удалось (уже удалено или нет прав)."
+            : "Пользователь забанен в группе, сообщение удалено."
+      );
     } catch (error) {
       hapticNotify("error");
-      flash(actionErrorText(error));
+      flash(ownerActionErrorText(error));
     } finally {
       setActing(null);
     }
@@ -133,7 +136,7 @@ export default function OwnerToolsPage() {
     if (!userId) return;
     if (!(await confirmAction(`Забанить пользователя ${userId} во ВСЕХ группах бота?`))) return;
     haptic("medium");
-    setActing("ban");
+    setActing("ban-everywhere");
     try {
       await fetcher("/api/miniapp/owner/globalban", {
         method: "POST",
@@ -143,7 +146,7 @@ export default function OwnerToolsPage() {
       flash("Пользователь забанен везде.");
     } catch (error) {
       hapticNotify("error");
-      flash(actionErrorText(error));
+      flash(ownerActionErrorText(error));
     } finally {
       setActing(null);
     }
@@ -247,13 +250,13 @@ export default function OwnerToolsPage() {
                 {resolved.authorUserId && (
                   <>
                     <Button variant="danger" onClick={() => banResolvedAuthorInGroup(false)} disabled={acting !== null}>
-                      {acting === "ban" ? "Баним…" : "Забанить автора в группе"}
+                      {acting === "ban-group" ? "Баним…" : "Забанить автора в группе"}
                     </Button>
                     <Button variant="danger" onClick={() => banResolvedAuthorInGroup(true)} disabled={acting !== null}>
-                      {acting === "both" ? "Выполняем…" : "Забанить и удалить"}
+                      {acting === "ban-and-delete" ? "Выполняем…" : "Забанить и удалить"}
                     </Button>
                     <Button variant="secondary" onClick={banResolvedUserEverywhere} disabled={acting !== null}>
-                      {acting === "ban" ? "Баним…" : "Забанить во всех группах"}
+                      {acting === "ban-everywhere" ? "Баним…" : "Забанить во всех группах"}
                     </Button>
                   </>
                 )}
@@ -279,7 +282,7 @@ export default function OwnerToolsPage() {
                 {resolved.username ? ` (@${resolved.username})` : ""}
               </p>
               <Button variant="danger" onClick={banResolvedUserEverywhere} disabled={acting !== null}>
-                {acting === "ban" ? "Баним…" : "Забанить везде"}
+                {acting === "ban-everywhere" ? "Баним…" : "Забанить везде"}
               </Button>
             </div>
           )}

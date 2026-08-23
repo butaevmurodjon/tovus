@@ -28,6 +28,20 @@ export async function listAiRules(): Promise<AiRule[]> {
   return Object.values(all).sort((a, b) => a.createdAt - b.createdAt);
 }
 
+// HLEN-then-HSET as separate round-trips would be a TOCTOU race: two
+// concurrent addAiRule calls (e.g. a double-tap) could both read the same
+// pre-write count, both see room, and both write — overshooting
+// MAX_AI_RULES, the cap that exists to bound per-call DeepSeek token cost.
+// Same fix as customWords.ts's ADD_BATCH_SCRIPT: a Lua script runs
+// atomically on the Redis server, so the check and the write can't interleave.
+const ADD_RULE_SCRIPT = `
+local key = KEYS[1]
+local max = tonumber(ARGV[1])
+if redis.call('HLEN', key) >= max then return 0 end
+redis.call('HSET', key, ARGV[2], ARGV[3])
+return 1
+`;
+
 export async function addAiRule(
   label: AiRuleLabel,
   rawText: string
@@ -35,14 +49,14 @@ export async function addAiRule(
   const text = rawText.trim().slice(0, MAX_AI_RULE_LENGTH);
   if (!text) return { added: false, rules: await listAiRules() };
 
-  const redis = getRedis();
-  const count = await redis.hlen(key);
-  if (count >= MAX_AI_RULES) return { added: false, rules: await listAiRules() };
-
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   const rule: AiRule = { id, label, text, createdAt: Date.now() };
-  await redis.hset(key, { [id]: rule });
-  return { added: true, rules: await listAiRules() };
+  const added = await getRedis().eval<[string, string, string], number>(
+    ADD_RULE_SCRIPT,
+    [key],
+    [String(MAX_AI_RULES), id, JSON.stringify(rule)]
+  );
+  return { added: added === 1, rules: await listAiRules() };
 }
 
 export async function removeAiRule(id: string): Promise<AiRule[]> {

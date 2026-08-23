@@ -33,14 +33,15 @@ export async function recordMessage(
   text: string,
   username?: string | null
 ): Promise<void> {
-  const redis = getRedis();
   const cached: CachedMessage = { userId, text: text.slice(0, MAX_CACHED_TEXT_LENGTH) };
-  const writes = [
-    redis.set(lastMessageKey(chatId, userId), messageId, { ex: TTL_SECONDS }),
-    redis.set(authorKey(chatId, messageId), cached, { ex: TTL_SECONDS }),
-  ];
-  if (username) writes.push(redis.set(usernameKey(username), userId, { ex: TTL_SECONDS }));
-  await Promise.all(writes);
+  // Pipelined into one Upstash REST round trip instead of 2-3 concurrent
+  // calls — this runs on every non-edit message in every moderated group,
+  // the hottest path in the codebase.
+  const pipeline = getRedis().pipeline();
+  pipeline.set(lastMessageKey(chatId, userId), messageId, { ex: TTL_SECONDS });
+  pipeline.set(authorKey(chatId, messageId), cached, { ex: TTL_SECONDS });
+  if (username) pipeline.set(usernameKey(username), userId, { ex: TTL_SECONDS });
+  await pipeline.exec();
 }
 
 /** Best-effort — null if this username was never seen by the bot (or its

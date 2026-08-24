@@ -84,5 +84,19 @@ export const UZ_PROFANITY_ROOTS: string[] = [
  * inflected forms — "командир", "команда", "команду", etc. all start with "команд").
  * "херсон" guards the city name against root "хер"; "команд" guards
  * команда/командир/командование/etc. against root "манда" appearing mid-word
- * (2026-08 audit — see profanity.ts for why these can't be fixed by anchoring alone). */
-export const RU_WHITELIST_WORDS: string[] = ["конституция", "мандарин", "хустон", "херсон", "команд"];
+ * (2026-08 audit — see profanity.ts for why these can't be fixed by anchoring alone).
+ * 2026-08-24 audit (empirically verified against detectProfanity, not just read):
+ * "мандат" (mandate/credentials — root "манда", е.g. "депутатский мандат");
+ * "чмок" (the affectionate "чмоки"/"чмокнула" sign-off/kiss — root "чмо", one of
+ * the most common casual message-enders in Russian chat); "херувим" (cherub —
+ * root "хер", same collision class as "херсон"). */
+export const RU_WHITELIST_WORDS: string[] = [
+  "конституция",
+  "мандарин",
+  "хустон",
+  "херсон",
+  "команд",
+  "мандат",
+  "чмок",
+  "херувим",
+];

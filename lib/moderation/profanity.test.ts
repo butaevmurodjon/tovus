@@ -118,6 +118,24 @@ describe("detectProfanity — dictionary", () => {
     expect(detectProfanity("Прекрасные балы устраивали в 19 веке").matched).toBe(false);
   });
 
+  it("does not flag ordinary words colliding with a root as a substring (2026-08-24 audit)", () => {
+    // "манда" matching mid-word inside "мандат" — a normal formal-register
+    // word (mandate/credentials), not just the pre-existing "мандарин"/
+    // "команда" cases above.
+    expect(detectProfanity("у депутата есть мандат").matched).toBe(false);
+    expect(detectProfanity("мандат на управление истёк").matched).toBe(false);
+    // "чмо" matching inside "чмоки"/"чмокнула" — one of the most common casual
+    // affectionate sign-offs/verbs in Russian chat.
+    expect(detectProfanity("чмоки, увидимся завтра").matched).toBe(false);
+    expect(detectProfanity("она чмокнула его в щёку").matched).toBe(false);
+    // "хер" matching inside "херувим" (cherub) — same collision class as the
+    // pre-existing "Херсон" case above.
+    expect(detectProfanity("херувимы на картине прекрасны").matched).toBe(false);
+    // Actual profanity forms these additions must still catch.
+    expect(detectProfanity("манда твоя").matched).toBe(true);
+    expect(detectProfanity("иди ты нахер").matched).toBe(true);
+  });
+
   it("does not flag common Russian words that collided with removed UZ roots (regression)", () => {
     // The UZ root "кот" matched "кот" (cat), "скот" (livestock), "который",
     // "котёл" — hit every Russian-language agro/pet message regardless of the

@@ -109,8 +109,10 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   restrictNewMembersEnabled: false,
   restrictNewMembersMinutes: 10,
   nightModeEnabled: false,
-  nightModeStartHour: 23,
-  nightModeEndHour: 7,
+  // Compared against UTC hours (nightMode.ts), not local time. 18-2 UTC ==
+  // 23:00-07:00 in Tashkent (UTC+5, no DST) — the timezone most groups are in.
+  nightModeStartHour: 18,
+  nightModeEndHour: 2,
   plan: "free",
   planExpiresAt: null,
 };

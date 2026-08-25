@@ -46,6 +46,30 @@ export const CTA_PHRASES: string[] = [
   "тез орада даромад",
   "уйдан ишлаш",
   "жамоага қабул",
+  // 2026-08-25: uz-latin equivalents of the uz-cyrl block above — the previous
+  // list only covered ru + uz-cyrl, but Latin is the script most Uzbek
+  // Telegram users actually type in (official script since 1993), so DM-bait
+  // like "lichga yozing"/"biodagi guruhga yozing" was passing through
+  // undetected. Verified empirically against a real solicitation-ad message
+  // (paid coursework/presentation writing + DM/bio redirect) before adding.
+  "menga yozing",
+  "lsga yozing",
+  "lichga yozing",
+  "xususiyga yozing",
+  "kanalga obuna bo'ling",
+  "kanalga obuna boling",
+  "tez orada daromad",
+  "uydan ishlash",
+  "jamoaga qabul",
+  // "Group/link in bio" redirect — a distinct evasion pattern (no ru/uz-cyrl
+  // equivalent existed either) seen in the same real ad: pointing buyers to a
+  // bio link/group instead of an in-message link, so the link-count/domain
+  // checks never see anything to flag.
+  // Stems, not full inflected forms — "gruppaga"/"gruppamga"/"gruppasiga" and
+  // "guruhga"/"guruhimga"/"guruhiga" all share these prefixes, and .includes()
+  // matches mid-word same as everywhere else in this file.
+  "biodagi guruh",
+  "biodagi grupp",
   // Fake "official bank/gov app" installer pitch — the social-engineering line that
   // usually accompanies a scam .apk, ru + uz-cyrl.
   "скачайте официальное приложение",
@@ -57,6 +81,9 @@ export const CTA_PHRASES: string[] = [
   "расмий иловани юклаб олинг",
   "иловани янгиланг",
   "банк иловасини янгиланг",
+  "rasmiy ilovani yuklab oling",
+  "ilovani yangilang",
+  "bank ilovasini yangilang",
 ];
 
 /**

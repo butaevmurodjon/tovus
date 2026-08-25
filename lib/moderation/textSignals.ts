@@ -61,6 +61,31 @@ export function findMaskedLinkHost(text: string, entities: MessageEntity[] | und
   return null;
 }
 
+const BOT_STARTAPP_LINK_PATTERN = /^https?:\/\/t\.me\/[a-z0-9_]+\/?\?start(app)?=/i;
+
+/**
+ * findMaskedLinkHost only fires when the visible text itself looks like a
+ * URL/domain — by design, so it doesn't flag every "нажми тут"-style link.
+ * That leaves a gap: a scammer can hyperlink an ordinary trusted-looking word
+ * (a VPN app's name, a product name — nothing URL-shaped) straight to a
+ * Telegram bot's startapp deep link, which is how these chats hand off to
+ * phishing/mini-app bots. Real example (2026-08-25 audit): the word "amnezia"
+ * (a real VPN app) hyperlinked to a t.me bot with a startapp UUID payload.
+ * Scoped tightly to t.me bot startapp URLs specifically — not "any mismatched
+ * anchor text" — because that's the concrete delivery mechanism seen in the
+ * wild; broadening further would flag ordinary "click here" links too.
+ */
+export function findCloakedBotLink(text: string, entities: MessageEntity[] | undefined): string | null {
+  for (const entity of entities ?? []) {
+    if (entity.type !== "text_link" || !entity.url) continue;
+    if (!BOT_STARTAPP_LINK_PATTERN.test(entity.url)) continue;
+    const visible = text.slice(entity.offset, entity.offset + entity.length).trim();
+    if (/t\.me|https?:\/\/|\bbot\b/i.test(visible)) continue;
+    return entity.url;
+  }
+  return null;
+}
+
 /**
  * .apk/.exe/.jar-style attachments — fake "official bank/gov app" installers are
  * the dominant malware vector in these group chats, and scammers routinely send

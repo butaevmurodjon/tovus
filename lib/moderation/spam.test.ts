@@ -97,6 +97,44 @@ describe("detectSpam", () => {
     expect(result.matched).toBe(false);
   });
 
+  it("flags a brand-name word cloaking a t.me bot startapp link (2026-08-25 audit, real-world example)", () => {
+    // findMaskedLinkHost only fires when the visible anchor text itself looks
+    // like a URL — this evades that on purpose by hyperlinking an ordinary
+    // trusted word ("amnezia", a real VPN app) straight to a bot's startapp
+    // deep link. Real sample: a VPN-recommendation testimonial where "amnezia"
+    // was secretly a link to https://t.me/for_testing_everything_yeah_bot?startapp=<uuid>.
+    const text = "я на amnezia сижу, у них свой протокол который блокировки обходит, стабильно работает!";
+    const result = detectSpam(
+      msg(text, [
+        {
+          type: "text_link",
+          offset: 5,
+          length: 7,
+          url: "https://t.me/for_testing_everything_yeah_bot?startapp=bfc57216-28f8-4d47-a10e-1cf57acbe744",
+        },
+      ])
+    );
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+    expect(result.reason).toContain("for_testing_everything_yeah_bot");
+  });
+
+  it("does not flag an ordinary VPN recommendation with no link at all", () => {
+    // The prose here ("many VPNs are down, I use X, works great") is common,
+    // legitimate chat during block waves and must not be flagged by itself —
+    // only the cloaked-link delivery mechanism is the actual spam signal.
+    const text = "многие VPN сейчас легли, я на amnezia сижу, стабильно работает";
+    expect(detectSpam(msg(text)).matched).toBe(false);
+  });
+
+  it("does not flag a text_link to a t.me bot whose visible text names the bot/link openly", () => {
+    const text = "запусти бота t.me/some_bot?startapp=xyz";
+    const result = detectSpam(
+      msg(text, [{ type: "text_link", offset: 13, length: 27, url: "https://t.me/some_bot?startapp=xyz" }])
+    );
+    expect(result.matched).toBe(false);
+  });
+
   it("flags a CTA forwarded from a regular user, not just from a channel", () => {
     const result = detectSpam(
       msg("пиши в лс, есть предложение", undefined, { type: "user", date: 0, sender_user: { id: 1, is_bot: false, first_name: "A" } } as unknown as Message["forward_origin"])
@@ -116,6 +154,28 @@ describe("detectSpam", () => {
   it("does not flag an @mention without any CTA phrase", () => {
     const result = detectSpam(msg("@friend как дела?", [{ type: "mention", offset: 0, length: 7 }]));
     expect(result.matched).toBe(false);
+  });
+
+  it("flags an uz-latin DM-bait ad paired with a mention (2026-08-25 audit, real-world example)", () => {
+    // CTA_PHRASES previously only covered ru + uz-cyrl (per its own comment) —
+    // this real solicitation ad (paid coursework/presentation writing,
+    // redirecting to DM or a "group in bio") is standard uz-latin and slipped
+    // through undetected until the uz-latin + "bio redirect" phrases were added.
+    const text =
+      "Qolyozma daftar list Elektron prezentatsiyalar maqola Slayd Amaliy ish bolsa tayyorlab beraman " +
+      "tayyorlatmoqchilar lich yozilar yoki biodagi gruppamga yozinglar";
+    const result = detectSpam(msg(`@Bahor_0422 ${text}`, [{ type: "mention", offset: 0, length: 12 }]));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("low");
+  });
+
+  it("does not flag ordinary uz-latin conversation containing the new phrases' word stems", () => {
+    // Stress-test for the "biodagi guruh"/"biodagi grupp" stems added alongside
+    // the uz-latin CTA phrases — must not fire on benign uses of "guruh"/"bio"/"menga".
+    expect(detectSpam(msg("Guruhga yangi a'zo qo'shildi, xush kelibsiz")).matched).toBe(false);
+    expect(detectSpam(msg("Menga bugun kitob kerak edi, kim biladimi qayerdan olsa bo'ladi")).matched).toBe(false);
+    expect(detectSpam(msg("Bio-fizika darsi ertaga soat 9 da boshlanadi")).matched).toBe(false);
+    expect(detectSpam(msg("Prezentatsiya tayyor, ertaga yuklayman")).matched).toBe(false);
   });
 
   it("flags a pay-for-views job scam with no links or mentions (RabotaUzb-style) at high severity", () => {

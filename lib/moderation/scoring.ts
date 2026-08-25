@@ -13,6 +13,7 @@ import {
   containsCta,
   countMentions,
   extractLinks,
+  findCloakedBotLink,
   findDangerousFileTag,
   findMaskedLinkHost,
   hostnameOf,
@@ -74,8 +75,8 @@ function zoneFor(score: number): Zone {
 // blacklisted domain AND mass mentions) both show up in the evidence list —
 // §4.11's "only the group max counts toward the sum" is applied in
 // scoreSignals below, not here. The underlying pure text/entity helpers
-// (extractLinks, hostnameOf, findMaskedLinkHost, findDangerousFileTag,
-// containsCta, countMentions) live in ./textSignals, shared with spam.ts, so
+// (extractLinks, hostnameOf, findMaskedLinkHost, findCloakedBotLink,
+// findDangerousFileTag, containsCta, countMentions) live in ./textSignals, shared with spam.ts, so
 // the two detectors can't silently drift apart on link/CTA/file logic.
 
 /** Collects every spam-related signal that matches, with §4.4's weights. Pure
@@ -102,6 +103,11 @@ export function collectSpamSignals(message: Message): Signal[] {
   const maskedHost = findMaskedLinkHost(text, entities);
   if (maskedHost) {
     signals.push({ name: "masked_link", weight: 90, evidence: maskedHost, group: "link-risk" });
+  }
+
+  const cloakedBotLink = findCloakedBotLink(text, entities);
+  if (cloakedBotLink) {
+    signals.push({ name: "cloaked_bot_link", weight: 90, evidence: cloakedBotLink, group: "link-risk" });
   }
 
   for (const link of links) {

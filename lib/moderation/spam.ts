@@ -4,6 +4,7 @@ import {
   containsCta,
   countMentions,
   extractLinks,
+  findCloakedBotLink,
   findDangerousFileTag,
   findMaskedLinkHost,
   hostnameOf,
@@ -47,6 +48,11 @@ export function detectSpam(message: Message): SpamResult {
   const maskedHost = findMaskedLinkHost(text, entities);
   if (maskedHost) {
     return { matched: true, reason: `маскированная ссылка (ведёт на ${maskedHost})`, severity: "high" };
+  }
+
+  const cloakedBotLink = findCloakedBotLink(text, entities);
+  if (cloakedBotLink) {
+    return { matched: true, reason: `обычное слово замаскировано под ссылку на бота: ${cloakedBotLink}`, severity: "high" };
   }
 
   for (const link of links) {

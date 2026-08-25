@@ -13,6 +13,24 @@ function msg(text: string, entities?: MessageEntity[], forward_origin?: Message[
   } as unknown as Message;
 }
 
+function quoteMsg(
+  ownText: string,
+  quoteText: string,
+  options: { external?: boolean; quoteEntities?: MessageEntity[] } = {}
+): Message {
+  return {
+    message_id: 1,
+    date: 0,
+    chat: { id: 1, type: "supergroup", title: "t" },
+    text: ownText,
+    quote: { text: quoteText, entities: options.quoteEntities, position: 0 },
+    external_reply:
+      options.external ?? true
+        ? { origin: { type: "channel", date: 0, chat: { id: -100, type: "channel", title: "ad channel" }, message_id: 639874 } }
+        : undefined,
+  } as unknown as Message;
+}
+
 function docMsg(document: Partial<NonNullable<Message["document"]>>, caption?: string): Message {
   return {
     message_id: 1,
@@ -133,6 +151,65 @@ describe("detectSpam", () => {
       msg(text, [{ type: "text_link", offset: 13, length: 27, url: "https://t.me/some_bot?startapp=xyz" }])
     );
     expect(result.matched).toBe(false);
+  });
+
+  it("flags an ad relayed via Telegram's Quote-reply feature from another channel (real-world example, 2026-08-26)", () => {
+    // The sender's own text is an innocuous-sounding recommendation; the full
+    // ad pitch (VanyaVPN) rides along in message.quote/external_reply, which
+    // no other check in this file ever looks at.
+    const adText = [
+      "🔥 Бесплатный впн VanyaVPN",
+      "Надоели блокировки, медленная загрузка и ограничения?",
+      "⚡️ Быстрое подключение",
+      "🔒 Защита вашего соединения",
+      "🌍 115 бесплатных локаций",
+      "📱 Работает на телефоне и компьютере",
+      "Скачивай наше приложение и пользуйся интернетом на своих условиях.",
+    ].join("\n");
+    const result = detectSpam(quoteMsg("Хороший впн, советую", adText));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+    expect(result.reason).toContain("из другого чата/канала");
+  });
+
+  it("still flags the same ad when the quote is truncated to just its opening line", () => {
+    // Telegram's client UI (and a manually-selected quote.is_manual excerpt)
+    // can cut a quote down to a couple dozen characters — detection must not
+    // depend on the ad's closing CTA line surviving that truncation.
+    const truncated = "🔥 Бесплатный впн VanyaVPN\nН";
+    const result = detectSpam(quoteMsg("Хороший впн, советую", truncated));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+  });
+
+  it("flags a quote-relayed ad even without external_reply (ad already quoted from the same chat)", () => {
+    const result = detectSpam(quoteMsg("го глянь", "скачивай наше приложение и получи бонус", { external: false }));
+    expect(result.matched).toBe(true);
+    expect(result.reason).not.toContain("из другого чата/канала");
+  });
+
+  it("flags a bare CTA phrase in a quote as low severity — no ad-hook marker to distinguish relay from warning-about-spam", () => {
+    // Quoting a message to warn about it ("не ведитесь, это скам: ...") looks
+    // identical at this level, so an unmarked CTA-in-quote can't be high the
+    // way a QUOTE_AD_MARKERS hit is.
+    const result = detectSpam(quoteMsg("осторожно, вот такое рассылают", "хочешь заработать без вложений?"));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("low");
+  });
+
+  it("does not flag an ordinary quote-reply with no ad content", () => {
+    const result = detectSpam(quoteMsg("+1, согласен", "давайте перенесём встречу на завтра"));
+    expect(result.matched).toBe(false);
+  });
+
+  it("flags a blacklisted domain hidden in a quoted ad (plain-text URL, no entities)", () => {
+    // TextQuote.entities never carries a "url" entity (Bot API strips it, same
+    // as text_link) — this must go through extractLinks' regex fallback, which
+    // only matches URLs with an explicit https://, t.me/, or www. prefix.
+    const result = detectSpam(quoteMsg("зацени", "полная версия тут: https://bit.ly/free-vpn-full"));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+    expect(result.reason).toContain("bit.ly");
   });
 
   it("flags a CTA forwarded from a regular user, not just from a channel", () => {

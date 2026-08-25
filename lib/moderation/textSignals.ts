@@ -87,6 +87,27 @@ export function findCloakedBotLink(text: string, entities: MessageEntity[] | und
 }
 
 /**
+ * Telegram's "Quote" reply feature lets a message carry a verbatim excerpt of
+ * ANOTHER message (message.quote) — often relayed from a different chat or
+ * channel via message.external_reply — while message.text/caption is only
+ * the sender's own added commentary ("Хороший впн, советую"). None of the
+ * checks in this file ever look at quote.text, so a full ad pitch can ride
+ * along completely unscanned as long as the sender's own words sound
+ * innocuous — a distinct relay mechanism from forward_origin, where the
+ * forwarded content becomes message.text itself. Gated on quote.text alone,
+ * not on external_reply: external_reply narrows to cross-chat relays, but a
+ * quote of an ad already sitting in the same chat is just as much a relay and
+ * shouldn't get a pass for it. isExternal is returned only so callers can say
+ * "from another chat/channel" in a violation reason when it's known true.
+ */
+export function extractQuote(
+  message: Message
+): { text: string; entities: MessageEntity[] | undefined; isExternal: boolean } | null {
+  if (!message.quote?.text) return null;
+  return { text: message.quote.text, entities: message.quote.entities, isExternal: Boolean(message.external_reply) };
+}
+
+/**
  * .apk/.exe/.jar-style attachments — fake "official bank/gov app" installers are
  * the dominant malware vector in these group chats, and scammers routinely send
  * them with no caption at all, so this must not depend on message text existing.

@@ -84,7 +84,31 @@ export const CTA_PHRASES: string[] = [
   "rasmiy ilovani yuklab oling",
   "ilovani yangilang",
   "bank ilovasini yangilang",
+  // Generic self-promotional "download our app" pitch — the standard closing
+  // line of ad-post templates (VPN/casino/dating-app spam), distinct from the
+  // "official/bank app" social-engineering framing above. Real example
+  // (2026-08-26): a "VanyaVPN" ad relayed via Telegram's Quote-reply feature
+  // (message.quote/external_reply — see extractQuote in textSignals.ts) ending
+  // "Скачивай наше приложение и пользуйся интернетом на своих условиях."
+  "скачивай наше приложение",
+  "скачивайте наше приложение",
+  "скачай наше приложение",
 ];
+
+/**
+ * Ad-template "hook" phrases — picked from the OPENING line of a promo post,
+ * not its closing CTA — consulted ONLY against a quoted excerpt relayed via
+ * Telegram's Quote-reply feature (message.quote), never against a message's
+ * own free-form text: they're common enough as ordinary vocabulary ("кто
+ * знает бесплатный впн?") that adding them to CTA_PHRASES would false-positive
+ * on everyday chat. A quote can be truncated to a couple dozen characters —
+ * by the client's own display, or because the sender manually selected only a
+ * short fragment (quote.is_manual) — and still needs to trip detection, which
+ * a closing-line CTA phrase can't guarantee to survive. Real example
+ * (2026-08-26): a "VanyaVPN" ad quoted from https://t.me/farpilive_chat,
+ * quote.text opening "🔥 Бесплатный впн VanyaVPN...".
+ */
+export const QUOTE_AD_MARKERS: string[] = ["бесплатный впн", "бесплатный vpn"];
 
 /**
  * Strong standalone scam-scheme phrases ("мошеннические схемы"): pay-for-views

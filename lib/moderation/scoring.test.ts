@@ -118,6 +118,20 @@ describe("collectSpamSignals", () => {
     expect(signals.some((s) => s.name === "cta_alone")).toBe(false);
   });
 
+  it("collects quote_ad_relay (weight 75) for an ad-hook marker in a quoted message, even with no own text", () => {
+    const signals = collectSpamSignals(
+      msg({ quote: { text: "🔥 Бесплатный впн VanyaVPN, скачивай наше приложение", position: 0 } as never })
+    );
+    expect(signals).toEqual([
+      { name: "quote_ad_relay", weight: 75, evidence: "бесплатный впн", group: "link-risk" },
+    ]);
+  });
+
+  it("collects quote_cta (weight 25, well below quote_ad_relay/forward_cta) for a bare CTA phrase in a quote with no ad-hook marker", () => {
+    const signals = collectSpamSignals(msg({ quote: { text: "хочешь заработать без вложений?", position: 0 } as never }));
+    expect(signals).toEqual([{ name: "quote_cta", weight: 25, evidence: "cta-in-quote", group: "link-risk" }]);
+  });
+
   it("collects both a link-risk signal and an independent additive signal for the same message", () => {
     const signals = collectSpamSignals(
       msg({

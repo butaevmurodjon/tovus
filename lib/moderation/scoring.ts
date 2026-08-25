@@ -7,12 +7,14 @@ import {
   FLOOD_MAX_MESSAGES,
   LINK_COUNT_THRESHOLD,
   MENTION_COUNT_THRESHOLD,
+  QUOTE_AD_MARKERS,
   SCAM_PATTERNS,
 } from "./spamDict";
 import {
   containsCta,
   countMentions,
   extractLinks,
+  extractQuote,
   findCloakedBotLink,
   findDangerousFileTag,
   findMaskedLinkHost,
@@ -77,7 +79,8 @@ function zoneFor(score: number): Zone {
 // scoreSignals below, not here. The underlying pure text/entity helpers
 // (extractLinks, hostnameOf, findMaskedLinkHost, findCloakedBotLink,
 // findDangerousFileTag, containsCta, countMentions) live in ./textSignals, shared with spam.ts, so
-// the two detectors can't silently drift apart on link/CTA/file logic.
+// the two detectors can't silently drift apart on link/CTA/file logic. Same
+// goes for extractQuote, used below to score the "quote-relay" evasion.
 
 /** Collects every spam-related signal that matches, with §4.4's weights. Pure
  * function of the message — no Redis, safe to call unconditionally. */
@@ -87,6 +90,35 @@ export function collectSpamSignals(message: Message): Signal[] {
   const dangerousFile = findDangerousFileTag(message);
   if (dangerousFile) {
     signals.push({ name: "dangerous_file", weight: 100, evidence: dangerousFile, group: "link-risk" });
+  }
+
+  // Mirrors spam.ts's quote-relay check (see extractQuote's docstring) —
+  // collected here too so the shadow scorer already models this evasion by
+  // the time §11.3 promotes it toward gating real actions.
+  const quote = extractQuote(message);
+  if (quote) {
+    const quoteLower = quote.text.toLowerCase();
+    const quoteScamPattern = SCAM_PATTERNS.find((phrase) => quoteLower.includes(phrase));
+    if (quoteScamPattern) {
+      signals.push({ name: "quote_scam_pattern", weight: 90, evidence: quoteScamPattern, group: "link-risk" });
+    }
+    const quoteLinks = extractLinks(quote.text, quote.entities);
+    for (const link of quoteLinks) {
+      const host = hostnameOf(link);
+      if (host && DOMAIN_BLACKLIST.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
+        signals.push({ name: "quote_blacklisted_domain", weight: 85, evidence: host, group: "link-risk" });
+        break;
+      }
+    }
+    const quotePromo = QUOTE_AD_MARKERS.find((phrase) => quoteLower.includes(phrase));
+    if (quotePromo) {
+      signals.push({ name: "quote_ad_relay", weight: 75, evidence: quotePromo, group: "link-risk" });
+    } else if (containsCta(quote.text)) {
+      // Weaker than quote_ad_relay/forward_cta: a bare CTA phrase inside a
+      // quote is just as consistent with quoting a spam message to warn about
+      // it as with relaying one — see spam.ts's identical severity split.
+      signals.push({ name: "quote_cta", weight: 25, evidence: "cta-in-quote", group: "link-risk" });
+    }
   }
 
   const text = message.text ?? message.caption ?? "";

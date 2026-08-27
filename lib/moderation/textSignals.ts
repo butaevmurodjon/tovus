@@ -107,21 +107,40 @@ export function extractQuote(
   return { text: message.quote.text, entities: message.quote.entities, isExternal: Boolean(message.external_reply) };
 }
 
-/**
- * .apk/.exe/.jar-style attachments — fake "official bank/gov app" installers are
- * the dominant malware vector in these group chats, and scammers routinely send
- * them with no caption at all, so this must not depend on message text existing.
- * Both file_name and mime_type are sender-supplied (spoofable), but scammers here
- * generally aren't hiding the extension — the ".apk" is often part of the pitch.
- * Returns the matched extension (with leading dot) or mime type.
- */
-export function findDangerousFileTag(message: Message): string | null {
-  const doc = message.document;
+/** Extension/MIME check for one Document object. file_name and mime_type are
+ * sender-supplied (spoofable), but scammers here generally aren't hiding the
+ * extension — the ".apk" is often part of the pitch. Returns the matched
+ * extension (with leading dot) or mime type. */
+function classifyDocument(doc: Message["document"] | undefined): string | null {
   if (!doc) return null;
   const name = doc.file_name?.toLowerCase() ?? "";
   const ext = name.match(/\.([a-z0-9]+)$/)?.[1];
   if (ext && DANGEROUS_FILE_EXTENSIONS.includes(ext)) return `.${ext}`;
   if (doc.mime_type && DANGEROUS_MIME_TYPES.includes(doc.mime_type.toLowerCase())) return doc.mime_type;
+  return null;
+}
+
+/**
+ * .apk/.exe/.jar-style attachments — fake "official bank/gov app" installers are
+ * the dominant malware vector in these group chats, and scammers routinely send
+ * them with no caption at all, so this must not depend on message text existing.
+ *
+ * Also inspects message.external_reply.document. Telegram's cross-chat
+ * Quote-reply carries the replied-to message's attachment there — NEVER in
+ * message.document — so a malware installer relayed from another channel with
+ * an innocuous own-text ("Спасибо!! Грузит!!)") was landing in a field no
+ * detector ever read. Real example (2026-08-27): "Erwines VPN.apk" quoted from
+ * another channel into a managed group. A quoted installer is exactly as
+ * dangerous to a member who taps it as an attached one, so same tag/severity;
+ * fromQuotedMessage is returned only so callers can say where it came from.
+ */
+export function findDangerousFileTag(
+  message: Message
+): { tag: string; fromQuotedMessage: boolean } | null {
+  const own = classifyDocument(message.document);
+  if (own) return { tag: own, fromQuotedMessage: false };
+  const quoted = classifyDocument(message.external_reply?.document);
+  if (quoted) return { tag: quoted, fromQuotedMessage: true };
   return null;
 }
 

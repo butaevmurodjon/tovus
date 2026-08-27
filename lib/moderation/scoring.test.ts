@@ -73,6 +73,19 @@ describe("collectSpamSignals", () => {
     expect(signals).toEqual([{ name: "dangerous_file", weight: 100, evidence: ".apk", group: "link-risk" }]);
   });
 
+  it("flags a dangerous file carried in external_reply.document (Quote-relay), evidence marked (quoted)", () => {
+    const signals = collectSpamSignals(
+      msg({
+        text: "спасибо, грузит!",
+        external_reply: {
+          origin: { type: "channel", date: 0 },
+          document: { file_name: "Erwines VPN.apk", file_id: "x", file_unique_id: "x" },
+        } as never,
+      })
+    );
+    expect(signals).toEqual([{ name: "dangerous_file", weight: 100, evidence: ".apk (quoted)", group: "link-risk" }]);
+  });
+
   it("flags a blacklisted domain once even with repeats (plus link-count, both link-risk group)", () => {
     const signals = collectSpamSignals(msg({ text: "переходи https://bit.ly/x и https://bit.ly/y" }));
     expect(signals.filter((s) => s.name === "blacklisted_domain")).toEqual([

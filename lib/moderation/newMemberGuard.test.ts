@@ -49,6 +49,26 @@ describe("detectRestrictedContent", () => {
     expect(result).toBe("новый участник: медиа-вложение");
   });
 
+  it("flags media carried in a cross-chat Quote-reply (external_reply.document)", () => {
+    const result = detectRestrictedContent(
+      msg({
+        text: "спасибо!",
+        external_reply: {
+          origin: { type: "channel", date: 0 },
+          document: { file_id: "f", file_unique_id: "u", file_name: "app.apk" },
+        } as never,
+      })
+    );
+    expect(result).toBe("новый участник: медиа во вложенной цитате");
+  });
+
+  it("does not flag a plain-text cross-chat reply with no media", () => {
+    const result = detectRestrictedContent(
+      msg({ text: "согласен", external_reply: { origin: { type: "channel", date: 0 } } as never })
+    );
+    expect(result).toBeNull();
+  });
+
   it("does not flag plain text", () => {
     const result = detectRestrictedContent(msg({ text: "привет всем!" }));
     expect(result).toBeNull();

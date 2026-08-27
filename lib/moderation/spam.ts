@@ -25,7 +25,8 @@ export interface SpamResult {
 export function detectSpam(message: Message): SpamResult {
   const dangerousFile = findDangerousFileTag(message);
   if (dangerousFile) {
-    return { matched: true, reason: `опасный тип файла: ${dangerousFile}`, severity: "high" };
+    const where = dangerousFile.fromQuotedMessage ? " в цитируемом сообщении" : "";
+    return { matched: true, reason: `опасный тип файла${where}: ${dangerousFile.tag}`, severity: "high" };
   }
 
   // "Другой вид форварда": Telegram's Quote-reply feature carries an ad's

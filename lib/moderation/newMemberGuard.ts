@@ -33,5 +33,24 @@ export function detectRestrictedContent(message: Message): string | null {
     message.photo || message.video || message.animation || message.document || message.sticker || message.video_note
   );
   if (hasMediaAttachment) return "новый участник: медиа-вложение";
+  // A cross-chat Quote-reply carries the replied-to message's media in
+  // message.external_reply, not on the message itself (see findDangerousFileTag)
+  // — a fresh account leading with a quoted file/photo/sticker from another
+  // channel is the same ad-drop / phishing-drop shape the local check above
+  // catches, just relayed.
+  const ext = message.external_reply;
+  if (
+    ext &&
+    (ext.photo ||
+      ext.video ||
+      ext.animation ||
+      ext.document ||
+      ext.sticker ||
+      ext.video_note ||
+      ext.audio ||
+      ext.voice)
+  ) {
+    return "новый участник: медиа во вложенной цитате";
+  }
   return null;
 }

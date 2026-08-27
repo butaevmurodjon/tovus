@@ -89,7 +89,8 @@ export function collectSpamSignals(message: Message): Signal[] {
 
   const dangerousFile = findDangerousFileTag(message);
   if (dangerousFile) {
-    signals.push({ name: "dangerous_file", weight: 100, evidence: dangerousFile, group: "link-risk" });
+    const evidence = dangerousFile.fromQuotedMessage ? `${dangerousFile.tag} (quoted)` : dangerousFile.tag;
+    signals.push({ name: "dangerous_file", weight: 100, evidence, group: "link-risk" });
   }
 
   // Mirrors spam.ts's quote-relay check (see extractQuote's docstring) —

@@ -212,6 +212,58 @@ describe("detectSpam", () => {
     expect(result.reason).toContain("bit.ly");
   });
 
+  it("flags a malware installer relayed via Quote-reply — the .apk lives in external_reply.document, not message.document (real example, 2026-08-27: Erwines VPN.apk)", () => {
+    // The sender's own text is innocuous ("Спасибо!! Грузит!!)"); the actual
+    // payload — an .apk from another channel — rides along in
+    // external_reply.document, a field findDangerousFileTag didn't read before.
+    const message = {
+      message_id: 1,
+      date: 0,
+      chat: { id: 1, type: "supergroup", title: "t" },
+      text: "Спасибио!! Грузьит!!)",
+      quote: { text: "Erwines VPN", position: 0 },
+      external_reply: {
+        origin: { type: "channel", date: 0, chat: { id: -100, type: "channel", title: "ad channel" }, message_id: 12 },
+        document: { file_id: "f1", file_unique_id: "u1", file_name: "Erwines VPN.apk" },
+      },
+    } as unknown as Message;
+    const result = detectSpam(message);
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+    expect(result.reason).toContain("цитируемом сообщении");
+    expect(result.reason).toContain(".apk");
+  });
+
+  it("flags a quote-relayed installer by MIME when the extension was renamed off the file", () => {
+    const message = {
+      message_id: 1,
+      date: 0,
+      chat: { id: 1, type: "supergroup", title: "t" },
+      text: "спасибо, работает",
+      external_reply: {
+        origin: { type: "channel", date: 0, chat: { id: -100, type: "channel", title: "c" }, message_id: 9 },
+        document: { file_id: "f", file_unique_id: "u", file_name: "vpn", mime_type: "application/vnd.android.package-archive" },
+      },
+    } as unknown as Message;
+    const result = detectSpam(message);
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+  });
+
+  it("does not flag a harmless file (pdf) quoted from another chat", () => {
+    const message = {
+      message_id: 1,
+      date: 0,
+      chat: { id: 1, type: "supergroup", title: "t" },
+      text: "вот документ",
+      external_reply: {
+        origin: { type: "channel", date: 0, chat: { id: -100, type: "channel", title: "c" }, message_id: 9 },
+        document: { file_id: "f", file_unique_id: "u", file_name: "договор.pdf", mime_type: "application/pdf" },
+      },
+    } as unknown as Message;
+    expect(detectSpam(message).matched).toBe(false);
+  });
+
   it("flags a CTA forwarded from a regular user, not just from a channel", () => {
     const result = detectSpam(
       msg("пиши в лс, есть предложение", undefined, { type: "user", date: 0, sender_user: { id: 1, is_bot: false, first_name: "A" } } as unknown as Message["forward_origin"])

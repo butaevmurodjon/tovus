@@ -419,6 +419,30 @@ export function getBot(): Bot {
     }
     await Promise.all(sideEffects);
 
+    // TEMP DIAGNOSTIC (quote-relay spam — see memory quote-reply-spam-open-item):
+    // the bot persists no raw updates, so we have never actually observed the
+    // shape of a cross-chat Quote-reply that relays an ad. Two prior fixes
+    // (2a3d59f, f1c994b) were built on inferred payloads and the bug persists.
+    // Log just enough STRUCTURE — no message text, no user identity — to settle
+    // whether the ad pitch is reachable at all (message.quote.text) or only
+    // lives in a field the Bot API never exposes (ExternalReplyInfo carries no
+    // text/caption, only media objects). Remove once a real repro is captured.
+    if (message.quote || message.external_reply) {
+      console.log(
+        "[quote_probe]",
+        JSON.stringify({
+          chatId: chat.id,
+          hasQuote: Boolean(message.quote),
+          quoteLen: message.quote?.text?.length ?? 0,
+          quoteIsManual: message.quote?.is_manual ?? false,
+          extKeys: Object.keys(message.external_reply ?? {}),
+          extOriginType: message.external_reply?.origin?.type ?? null,
+          ownTextLen: (message.text ?? message.caption ?? "").length,
+          hasOwnDocument: Boolean(message.document),
+        })
+      );
+    }
+
     // A failure here must not silently skip moderation for this message — an
     // uncaught rejection would abort the whole handler before moderateMessage
     // ever runs, so a transient Telegram/Redis blip becomes an unlogged,

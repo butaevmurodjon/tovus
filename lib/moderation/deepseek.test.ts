@@ -1,5 +1,35 @@
 import { describe, expect, it } from "vitest";
-import { parseDeepseekContent } from "./deepseek";
+import { buildDeepseekUserContent, parseDeepseekContent } from "./deepseek";
+
+describe("buildDeepseekUserContent", () => {
+  it("returns bare own text when there is no quote", () => {
+    expect(buildDeepseekUserContent("привет всем")).toBe("привет всем");
+    expect(buildDeepseekUserContent("привет", undefined)).toBe("привет");
+    expect(buildDeepseekUserContent("привет", "   ")).toBe("привет");
+  });
+
+  it("fences the quoted fragment and labels it as untrusted data", () => {
+    const out = buildDeepseekUserContent("спс, работает", "🔥 Казино X — заноси, выводи без проблем");
+    expect(out).toContain("Собственный текст участника: ");
+    expect(out).toContain("BEGIN QUOTED-FRAGMENT");
+    expect(out).toContain("END QUOTED-FRAGMENT");
+    expect(out).toContain("Казино X");
+  });
+
+  it("notes when the member added no text of their own", () => {
+    const out = buildDeepseekUserContent("", "переходи на канал @promo, там раздают");
+    expect(out).toContain("(участник не добавил своего текста)");
+    expect(out).toContain("@promo");
+  });
+
+  it("caps own text at 2000 and the quote at 900 chars so the budget check sees the real size", () => {
+    const out = buildDeepseekUserContent("a".repeat(5000), "b".repeat(5000));
+    expect(out).toContain(`"${"a".repeat(2000)}"`);
+    expect(out).not.toContain("a".repeat(2001));
+    expect(out).toContain("b".repeat(900));
+    expect(out).not.toContain("b".repeat(901));
+  });
+});
 
 describe("parseDeepseekContent", () => {
   it("parses a spam violation", () => {

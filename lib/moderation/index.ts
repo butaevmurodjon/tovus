@@ -4,6 +4,7 @@ import { getCustomWords } from "@/lib/db/customWords";
 import { isProActive } from "@/lib/billing/plan";
 import { detectProfanity } from "./profanity";
 import { detectSpam, hasAnyLink } from "./spam";
+import { extractQuote } from "./textSignals";
 import { checkDuplicateFlood, checkUserFlood, consumeNewMemberFlag } from "./flood";
 import { classifyWithDeepseek } from "./deepseek";
 import { detectRestrictedContent, isNewMemberRestricted } from "./newMemberGuard";
@@ -140,17 +141,41 @@ export async function moderateMessage(
     }
   }
 
-  if (settings.premium && text && text.trim().length >= 6) {
+  // Telegram's Quote-reply can carry a full ad pitch in message.quote.text
+  // while the member's own text is a fig-leaf comment ("спс", "работает"). The
+  // base detectSpam quote checks (spam.ts) only match a tiny hand-list of ad
+  // markers / CTA phrases, so any ad phrased outside that list rides through.
+  // Feed the quoted excerpt to the classifier too — it's robust to novel
+  // phrasing where a phrase list never can be. Also lets the AI path fire when
+  // the member's own text is too short to have triggered it alone.
+  const quotedText = extractQuote(message)?.text.trim() ?? "";
+  if (settings.premium && (text.trim().length >= 6 || quotedText.length >= 12)) {
     const pool = isProActive(settings) ? "pro" : "free";
-    const verdict = await classifyWithDeepseek(text, pool);
+    const verdict = await classifyWithDeepseek(text, pool, quotedText ? { quotedText } : {});
     if (verdict?.violation) {
-      const forceWarnOnly = isFirstMessage && hasAnyLink(message) && !isKnownRepeatOffender;
+      // "Quote-driven" = the member's own text is a fig-leaf (below the >= 6
+      // gate above, so it could never have reached this classifier alone) and
+      // the quoted fragment is what carried the verdict — content the member
+      // only *relayed*, where quoting a scam to warn about it is a legit use of
+      // Quote-reply (see spam.ts's bare-CTA-in-quote severity split). Only then
+      // do we cap at a warn (unless a known repeat offender). A member whose
+      // *own* text trips the classifier gets the group's full configured action
+      // even with a quote attached — otherwise Quote-reply is a blanket shield
+      // against AI enforcement. The message is deleted unconditionally in
+      // applyViolation either way.
+      const quoteDriven =
+        quotedText.length >= 12 && text.trim().length < 6 && !hasAnyLink(message);
+      const forceWarnOnly = quoteDriven
+        ? !isKnownRepeatOffender
+        : isFirstMessage && hasAnyLink(message) && !isKnownRepeatOffender;
       const fallbackReason =
         verdict.category === "profanity"
           ? "нецензурная лексика (ИИ)"
           : verdict.category === "scam"
             ? "похоже на мошенничество (ИИ)"
-            : "спам/реклама (ИИ)";
+            : quoteDriven
+              ? "реклама, замаскированная под цитату (ИИ)"
+              : "спам/реклама (ИИ)";
       return {
         category: "premium",
         reason: verdict.reason || fallbackReason,

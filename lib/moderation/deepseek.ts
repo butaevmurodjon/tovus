@@ -5,7 +5,7 @@ import { listAiRules } from "@/lib/db/aiRules";
 const API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-chat";
 
-export type QuotaPool = "free" | "pro";
+export type QuotaPool = "free" | "pro" | "shadow";
 
 // Conservative guards so a burst of free-tier groups can never starve a
 // paying Pro group's quota — the "dedicated AI quota" perk. Numbers
@@ -21,6 +21,12 @@ export type QuotaPool = "free" | "pro";
 const BUDGETS: Record<QuotaPool, { rpm: number; rpd: number; tpm: number; tpd: number }> = {
   pro: { rpm: 8, rpd: 300, tpm: 3500, tpd: 30_000 },
   free: { rpm: 17, rpd: 600, tpm: 6500, tpd: 60_000 },
+  // Corpus training-data collection only (classifyWithDeepseekShadow): a
+  // deliberately small, self-contained slice so shadow sampling can never
+  // starve real free/pro moderation traffic. rpd IS the hard daily ceiling
+  // the plan calls for — tune via BUDGETS, not a separate knob. Sampling rate
+  // (CORPUS_AI_SAMPLE_RATE) is the coarse control; this is the safety cap.
+  shadow: { rpm: 5, rpd: 400, tpm: 2000, tpd: 20_000 },
 };
 
 const MAX_ATTEMPTS = 3;
@@ -226,4 +232,18 @@ export async function classifyWithDeepseek(
     }
   }
   return null;
+}
+
+/**
+ * Shadow classification for the training corpus (see lib/moderation/corpusCollector.ts).
+ * Identical call to classifyWithDeepseek but on the isolated `shadow` budget
+ * pool, and the result is ONLY ever written to the corpus — never enforced,
+ * never fed back into a verdict. Returns null on any failure / budget
+ * exhaustion, same contract as the real path.
+ */
+export async function classifyWithDeepseekShadow(
+  text: string,
+  opts: { quotedText?: string } = {}
+): Promise<DeepseekClassification | null> {
+  return classifyWithDeepseek(text, "shadow", opts);
 }

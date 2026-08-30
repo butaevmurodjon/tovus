@@ -1,8 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { authorizeGroupAdmin } from "@/lib/telegram/miniAppAuth";
 import { findJournalEntry, markJournalEntryRestored } from "@/lib/db/journal";
 import { getGroupSettings } from "@/lib/db/groups";
 import { getApi } from "@/lib/telegram/api";
+import { recordAdminLabel } from "@/lib/moderation/corpusCollector";
 import { t } from "@/lib/i18n";
 
 export const runtime = "nodejs";
@@ -59,5 +60,28 @@ export async function POST(
   }
 
   const updated = await markJournalEntryRestored(chatId, entryId);
+
+  // A restore is an admin saying "the bot got this wrong" — the single
+  // highest-quality negative label for the training corpus (plan:
+  // .claude/plans/delightful-petting-peacock.md). Best-effort, never blocks
+  // the response; hard no-op unless CORPUS_ENABLED.
+  if (entry.text) {
+    after(() =>
+      recordAdminLabel({
+        chatId,
+        messageId: entry.messageId,
+        userId: entry.userId,
+        username: entry.username,
+        displayName: entry.displayName,
+        text: entry.text,
+        detVerdict: entry.category,
+        detSource: "journal",
+        goldLabel: "none",
+        goldSource: "admin_restore",
+        goldBy: auth.user.id,
+      }).catch(() => {})
+    );
+  }
+
   return NextResponse.json({ entry: updated });
 }

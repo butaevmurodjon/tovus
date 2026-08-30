@@ -12,6 +12,8 @@ import { getStats } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { canUseProFeature, formatPlanLabel, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
 import { PRESETS, isPresetKey } from "@/lib/moderation/presets";
+import { recordAdminLabel } from "@/lib/moderation/corpusCollector";
+import { corpusEnabled } from "@/lib/db/corpus";
 import { detectLang, isLang, t, type Lang } from "@/lib/i18n";
 import type { ViolationAction } from "@/lib/db/types";
 import { formatPermissionWarning, getBotPermissions, isBotAdminOfChat, isChatAdmin } from "./adminCheck";
@@ -424,6 +426,55 @@ export function registerCommands(bot: Bot): void {
     }
     await ctx.reply(t(lang, "bot.customWordUsage"));
   });
+
+  // /spam and /ham — admin reply on a message to feed the training corpus a
+  // confirmed (gold) label (plan: .claude/plans/delightful-petting-peacock.md).
+  // /spam also deletes the message (the admin is telling us the bot missed it);
+  // /ham leaves it (an admin vouching that messages like this are fine). These
+  // are a corpus-collection feature — inert (and honest about it) when
+  // CORPUS_ENABLED is off, rather than silently doing a delete with no data
+  // captured.
+  for (const kind of ["spam", "ham"] as const) {
+    bot.command(kind, async (ctx) => {
+      const lang = await langFor(ctx);
+      if (!(await requireGroupChat(ctx, lang))) return;
+      if (!(await requireAdmin(ctx, lang))) return;
+      if (!corpusEnabled()) return ctx.reply(t(lang, "bot.reportDisabled"));
+
+      const target = ctx.message?.reply_to_message;
+      if (!target || !ctx.from) return ctx.reply(t(lang, "bot.reportUsage"));
+
+      const text = target.text ?? target.caption ?? "";
+      const author = target.from;
+
+      if (kind === "spam") {
+        await ctx.api.deleteMessage(ctx.chat!.id, target.message_id).catch(() => {});
+      }
+
+      const status = await recordAdminLabel({
+        chatId: ctx.chat!.id,
+        messageId: target.message_id,
+        userId: author?.id ?? null,
+        username: author?.username ?? null,
+        displayName: [author?.first_name, author?.last_name].filter(Boolean).join(" ") || null,
+        text,
+        entities: target.entities ?? target.caption_entities,
+        isForward: Boolean(target.forward_origin),
+        goldLabel: kind === "spam" ? "spam" : "none",
+        goldSource: "admin_report",
+        goldBy: ctx.from.id,
+        message: target,
+      }).catch(() => "skipped" as const);
+
+      const doneKey =
+        status === "stored"
+          ? kind === "spam"
+            ? "bot.reportSpamDone"
+            : "bot.reportHamDone"
+          : "bot.reportNoted";
+      await ctx.reply(t(lang, doneKey));
+    });
+  }
 
   bot.command("logchannel", async (ctx) => {
     const lang = await langFor(ctx);

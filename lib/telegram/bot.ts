@@ -6,7 +6,7 @@ import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } fro
 import { incrementActivity, incrementHourlyActivity, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { isGloballyBanned } from "@/lib/db/globalBan";
-import { recordMessage } from "@/lib/db/messageAuthors";
+import { getCachedMessage, getLastMessageId, recordMessage } from "@/lib/db/messageAuthors";
 import { canUseProFeature, formatPlanDate } from "@/lib/billing/plan";
 import { moderateMessage } from "@/lib/moderation";
 import { checkRaid, markNewMember } from "@/lib/moderation/flood";
@@ -15,6 +15,7 @@ import { markNewMemberRestricted } from "@/lib/moderation/newMemberGuard";
 import { isLikelyAdminImpersonation } from "@/lib/moderation/impersonation";
 import { recordReputationHit } from "@/lib/moderation/reputation";
 import { runShadowScoring } from "@/lib/moderation/scoring";
+import { collectModerationSample, recordAdminLabel } from "@/lib/moderation/corpusCollector";
 import { isSuspiciousJoinVelocity, recordJoinedGroup } from "@/lib/db/userGraph";
 import { addJournalEntry } from "@/lib/db/journal";
 import { detectLang, t } from "@/lib/i18n";
@@ -129,6 +130,39 @@ export function getBot(): Bot {
         const identity = isAdmin ? identityOf(update.new_chat_member.user) : undefined;
         await setUserAdminStatus(chat.id, update.new_chat_member.user.id, isAdmin, identity).catch(() => {});
       }
+    }
+
+    // Manual ban by a human admin = a gold label for the training corpus
+    // (plan: .claude/plans/delightful-petting-peacock.md). Weaker than /spam
+    // (admins ban for arguments and rule-breaking too, not only spam) but the
+    // export can weight by gold_source. Only recorded when we still have the
+    // banned user's last message text cached — a contentless ban teaches
+    // nothing. Skips our own moderation bans (update.from is the bot).
+    const banned = update.new_chat_member.status === "kicked";
+    const bannedUser = update.new_chat_member.user;
+    if (
+      banned &&
+      !update.from.is_bot &&
+      !bannedUser.is_bot &&
+      update.from.id !== bannedUser.id &&
+      ["member", "restricted"].includes(update.old_chat_member.status)
+    ) {
+      after(async () => {
+        const lastId = await getLastMessageId(chat.id, bannedUser.id).catch(() => null);
+        const cached = lastId ? await getCachedMessage(chat.id, lastId).catch(() => null) : null;
+        if (!cached?.text.trim()) return;
+        await recordAdminLabel({
+          chatId: chat.id,
+          messageId: lastId!,
+          userId: bannedUser.id,
+          username: bannedUser.username ?? null,
+          displayName: [bannedUser.first_name, bannedUser.last_name].filter(Boolean).join(" ") || null,
+          text: cached.text,
+          goldLabel: "spam",
+          goldSource: "admin_ban",
+          goldBy: update.from.id,
+        }).catch(() => {});
+      });
     }
   });
 
@@ -472,6 +506,11 @@ export function getBot(): Bot {
     // mid-flight once the response is sent. off-mode short-circuits before
     // any Redis call, so this is a no-op until MODERATION_V2 is actually set.
     after(() => runShadowScoring(message, settings, verdict, { isEdit }).catch(() => {}));
+    // Training-corpus collection (plan: .claude/plans/delightful-petting-peacock.md).
+    // Same discipline as runShadowScoring: after() so it never adds to webhook
+    // latency, env-gated (CORPUS_ENABLED, off by default) so it's a hard no-op
+    // otherwise, and it can never influence the verdict — it only reads.
+    after(() => collectModerationSample(message, settings, verdict, { isEdit }).catch(() => {}));
     if (!verdict) return;
 
     const sideEffectsAfterVerdict = [applyViolation(ctx.api, message, settings, verdict)];

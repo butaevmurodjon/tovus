@@ -35,6 +35,11 @@ export interface ModerationVerdict {
    * and must not feed reputation.ts — everything else defaults true. */
   countsTowardReputation?: boolean;
   source?: ModerationSource;
+  /** Only set when `source === "premium-ai"`: the DeepSeek classifier's own
+   * granular category, which the returned `category` collapses to "premium".
+   * Purely additive metadata for the training corpus (corpusCollector.ts) —
+   * never read by applyViolation/reputation.ts. */
+  aiCategory?: "spam" | "profanity" | "scam" | "none";
 }
 
 export async function moderateMessage(
@@ -181,6 +186,7 @@ export async function moderateMessage(
         reason: verdict.reason || fallbackReason,
         forceWarnOnly,
         source: "premium-ai",
+        aiCategory: verdict.category,
       };
     }
   }

@@ -19,6 +19,7 @@ interface TelegramWebApp {
   setBackgroundColor: (color: string) => void;
   disableVerticalSwipes?: () => void;
   openInvoice?: (url: string, callback?: (status: "paid" | "cancelled" | "failed" | "pending") => void) => void;
+  openTelegramLink?: (url: string) => void;
   showConfirm?: (message: string, callback: (confirmed: boolean) => void) => void;
   HapticFeedback?: {
     impactOccurred: (style: "light" | "medium" | "heavy" | "rigid" | "soft") => void;
@@ -84,6 +85,21 @@ export function openInvoice(url: string, onStatus?: (status: "paid" | "cancelled
     // the "absent" branch above does, rather than losing Stars checkout entirely.
     window.open(url, "_blank");
   }
+}
+
+/** Opens a t.me/… link inside the Telegram client when the method is
+ * available, otherwise a normal new tab (same degrade path as openInvoice). */
+export function openTelegramLink(url: string) {
+  const wa = window.Telegram?.WebApp;
+  if (wa?.openTelegramLink) {
+    try {
+      wa.openTelegramLink(url);
+      return;
+    } catch {
+      // method present but throws on older clients — fall through
+    }
+  }
+  window.open(url, "_blank");
 }
 
 /** Native confirm sheet for destructive actions (clear-all). Falls back to

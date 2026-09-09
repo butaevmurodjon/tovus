@@ -10,6 +10,7 @@ export function OwnerNav() {
 
   const items = [
     { href: "/owner", label: t("miniapp.ownerNavDashboard"), icon: "🛡" },
+    { href: "/owner/shadow", label: t("miniapp.ownerNavShadow"), icon: "🎯" },
     { href: "/owner/bans", label: t("miniapp.ownerNavBans"), icon: "⛔" },
     { href: "/owner/broadcast", label: t("miniapp.ownerNavBroadcast"), icon: "📣" },
     { href: "/owner/tools", label: t("miniapp.ownerNavTools"), icon: "🔧" },
@@ -32,11 +33,11 @@ export function OwnerNav() {
             key={item.href}
             href={item.href}
             aria-current={active ? "page" : undefined}
-            className="flex-1 flex flex-col items-center gap-0.5 py-2.5 select-none"
+            className="flex-1 flex flex-col items-center gap-0.5 py-2.5 px-1 select-none"
             style={{ color: active ? "var(--accent)" : "var(--ink-muted)" }}
           >
             <span className="text-[16px] leading-none">{item.icon}</span>
-            <span className="text-[11px] font-medium">{item.label}</span>
+            <span className="text-[11px] font-medium leading-tight text-center">{item.label}</span>
           </Link>
         );
       })}

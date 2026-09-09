@@ -9,6 +9,8 @@ import { t } from "@/lib/i18n";
 import { displayName, mentionHtml } from "./format";
 import { propagateBan } from "./federation";
 import { clearWarns, recordWarn } from "@/lib/moderation/warns";
+import { collectSpamSignals, countedSignals, scoreSignals } from "@/lib/moderation/scoring";
+import { getAllowlist } from "@/lib/db/allowlist";
 import { startVoteBan } from "./voteban";
 
 const MUTE_DURATION_SECONDS = 60 * 60; // 1h
@@ -80,6 +82,22 @@ async function logToJournal(
   text: string,
   escalated: boolean
 ) {
+  // §10.1.1 "почему сработало": explanatory re-derivation only — see
+  // JournalEntry.score. Pure/sync, but wrapped so an unexpected throw on some
+  // message shape can't take down the entry (and the stat increment it shares
+  // a Promise.all with in applyViolation).
+  let score: number | undefined;
+  let signals: { name: string; weight: number }[] = [];
+  const allowlist = await getAllowlist(chatId).catch(() => []);
+  try {
+    const collected = collectSpamSignals(message, allowlist);
+    score = scoreSignals(collected, 0, false).score;
+    signals = countedSignals(collected).map((s) => ({ name: s.name, weight: s.weight }));
+  } catch {
+    score = undefined;
+    signals = [];
+  }
+
   await addJournalEntry({
     id: randomId(),
     chatId,
@@ -94,6 +112,9 @@ async function logToJournal(
     escalated,
     timestamp: Date.now(),
     restored: false,
+    score,
+    signals,
+    source: verdict.source ?? null,
   });
 }
 

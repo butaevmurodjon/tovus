@@ -150,6 +150,11 @@ export default function OwnerBansPage() {
                 )}
                 <p className="text-[11px] mt-1" style={{ color: "var(--ink-muted)" }}>
                   {formatDate(entry.bannedAt, lang)}
+                  {/* `bannedBy` is absent on rows written before it was stored — show
+                      nothing for those rather than "актор 0". */}
+                  {typeof entry.bannedBy === "number" && entry.bannedBy > 0
+                    ? ` · ${t("miniapp.auditActor")} ${entry.bannedBy}`
+                    : ""}
                 </p>
               </div>
               <Button variant="secondary" onClick={() => unban(entry)} disabled={busyId === entry.userId}>

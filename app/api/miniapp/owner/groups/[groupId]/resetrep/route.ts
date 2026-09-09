@@ -3,6 +3,7 @@ import { authenticateRequest } from "@/lib/telegram/miniAppAuth";
 import { isOwner } from "@/lib/owner";
 import { isRegisteredGroup } from "@/lib/db/groups";
 import { resetReputation } from "@/lib/moderation/reputation";
+import { groupAuditLabel, recordOwnerAudit } from "@/lib/db/auditLog";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ groupId
     return NextResponse.json({ error: "invalid_user" }, { status: 400 });
   }
 
-  await resetReputation(chatId, userId);
+  const target = `user ${userId} · ${await groupAuditLabel(chatId)}`;
+  try {
+    await resetReputation(chatId, userId);
+  } catch (err) {
+    await recordOwnerAudit({ actorId: user.id, action: "group_resetrep", target, outcome: "ошибка" });
+    console.error("Owner resetrep failed:", err);
+    return NextResponse.json({ error: "resetrep_failed" }, { status: 500 });
+  }
+  await recordOwnerAudit({ actorId: user.id, action: "group_resetrep", target });
   return NextResponse.json({ ok: true });
 }

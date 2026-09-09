@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "grammy/types";
 import { DEFAULT_GROUP_SETTINGS, type GroupSettings } from "@/lib/db/types";
-import { collectSpamSignals, isReputationOnlyTrigger, moderationV2Mode, runShadowScoring, scoreSignals } from "./scoring";
+import {
+  collectSpamSignals,
+  countedSignals,
+  isReputationOnlyTrigger,
+  moderationV2Mode,
+  runShadowScoring,
+  scoreSignals,
+} from "./scoring";
 
 // runShadowScoring's gating tests below exercise real code past the Redis
 // boundary — stub every Redis-touching call so the tests assert on gating
@@ -238,6 +245,29 @@ describe("scoreSignals", () => {
   it("the +10 new-account modifier is still clamped to 100, not pushed past it", () => {
     const result = scoreSignals([{ name: "dangerous_file", weight: 100, evidence: ".exe", group: "link-risk" }], 0, true);
     expect(result.score).toBe(100);
+  });
+});
+
+describe("countedSignals", () => {
+  it("keeps only the highest-weight link-risk signal, and (below the 100 clamp) its weights sum to the score", () => {
+    const signals = [
+      { name: "link_count_high", weight: 55, evidence: "3 links", group: "link-risk" as const },
+      { name: "link_count_low", weight: 30, evidence: "2 links", group: "link-risk" as const },
+      { name: "cta_alone", weight: 20, evidence: "cta" },
+    ];
+    const counted = countedSignals(signals);
+    expect(counted.map((s) => s.name).sort()).toEqual(["cta_alone", "link_count_high"]);
+    const summed = counted.reduce((n, s) => n + s.weight, 0);
+    expect(summed).toBe(scoreSignals(signals, 0).score);
+  });
+
+  it("returns standalone signals unchanged when there is no link-risk group", () => {
+    const signals = [{ name: "cta_alone", weight: 20, evidence: "cta" }];
+    expect(countedSignals(signals)).toEqual(signals);
+  });
+
+  it("is empty for an empty input", () => {
+    expect(countedSignals([])).toEqual([]);
   });
 });
 

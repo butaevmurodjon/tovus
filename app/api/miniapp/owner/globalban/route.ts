@@ -4,6 +4,7 @@ import { getApi } from "@/lib/telegram/api";
 import { isOwner } from "@/lib/owner";
 import { listGlobalBans } from "@/lib/db/globalBan";
 import { banUserEverywhere, unbanUserEverywhere } from "@/lib/telegram/globalBan";
+import { recordOwnerAudit } from "@/lib/db/auditLog";
 
 export const runtime = "nodejs";
 
@@ -29,6 +30,13 @@ export async function POST(req: Request) {
   }
 
   const result = await banUserEverywhere(getApi(), userId, reason || "—", user.id);
+  await recordOwnerAudit({
+    actorId: user.id,
+    action: "globalban",
+    target: `user ${userId}`,
+    detail: reason || undefined,
+    outcome: `${result.bannedGroups}/${result.totalGroups} групп`,
+  });
   return NextResponse.json(result);
 }
 
@@ -44,5 +52,11 @@ export async function DELETE(req: Request) {
   }
 
   const result = await unbanUserEverywhere(getApi(), userId);
+  await recordOwnerAudit({
+    actorId: user.id,
+    action: "globalunban",
+    target: `user ${userId}`,
+    outcome: `${result.unbannedGroups}/${result.totalGroups} групп`,
+  });
   return NextResponse.json(result);
 }

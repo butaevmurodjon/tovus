@@ -63,3 +63,16 @@ export async function clearLastMessage(chatId: number, userId: number): Promise<
 export async function getCachedMessage(chatId: number, messageId: number): Promise<CachedMessage | null> {
   return (await getRedis().get<CachedMessage>(authorKey(chatId, messageId))) ?? null;
 }
+
+/** Batched getCachedMessage — one MGET instead of N round trips. Result is
+ * positionally aligned with `refs` (null for any that missed). Used by the
+ * owner shadow-review screen, which joins text onto a page of divergence
+ * samples at once. */
+export async function getCachedMessages(
+  refs: { chatId: number; messageId: number }[]
+): Promise<(CachedMessage | null)[]> {
+  if (refs.length === 0) return [];
+  const keys = refs.map((r) => authorKey(r.chatId, r.messageId));
+  const rows = await getRedis().mget<(CachedMessage | null)[]>(...keys);
+  return refs.map((_, i) => rows?.[i] ?? null);
+}

@@ -199,8 +199,56 @@ export async function getShadowStats(chatId: number, days: number): Promise<Shad
   return aggregateShadowBuckets(buckets);
 }
 
-export async function getShadowDivergenceSamples(chatId: number, limit = DIVERGENCE_SAMPLE_LIMIT): Promise<DivergenceSample[]> {
+export interface ShadowStatsByChatId {
+  /** Every group's day-buckets flattened through the same pure aggregator —
+   * identical to summing `perGroup`, kept as a separate field so the screen
+   * doesn't re-derive it. */
+  overall: ShadowStatsBucket;
+  /** One row per group that scored at least one message in the window, so
+   * `perGroup.length` ≤ the registered-group count the route also returns.
+   * No fixed order here — the route sorts. */
+  perGroup: { chatId: number; stats: ShadowStatsBucket }[];
+}
+
+/** Bot-wide roll-up + per-group breakdown for the owner calibration screen,
+ * from one fan-out. Matches owner/overview's existing shape — a cursor pass is
+ * tracked separately in ROADMAP §6.1. */
+export async function getShadowStatsByChatId(chatIds: number[], days: number): Promise<ShadowStatsByChatId> {
+  if (chatIds.length === 0) return { overall: aggregateShadowBuckets([]), perGroup: [] };
   const redis = getRedis();
-  const raw = await redis.lrange<DivergenceSample>(shadowDivergenceKey(chatId), 0, limit - 1);
+  const dates = lastNDates(days);
+  const perGroupBuckets = await Promise.all(
+    chatIds.map((chatId) =>
+      Promise.all(dates.map((d) => redis.hgetall<Record<string, number>>(shadowStatsKey(chatId, d))))
+    )
+  );
+  const perGroup = chatIds
+    .map((chatId, i) => ({ chatId, stats: aggregateShadowBuckets(perGroupBuckets[i]) }))
+    .filter((g) => g.stats.total > 0);
+  return { overall: aggregateShadowBuckets(perGroupBuckets.flat()), perGroup };
+}
+
+export async function getShadowDivergenceSamples(
+  chatId: number,
+  limit = DIVERGENCE_SAMPLE_LIMIT,
+  offset = 0
+): Promise<DivergenceSample[]> {
+  const redis = getRedis();
+  const raw = await redis.lrange<DivergenceSample>(shadowDivergenceKey(chatId), offset, offset + limit - 1);
   return raw ?? [];
+}
+
+/** One pipelined LLEN per group so the owner samples screen can build its
+ * group index (title + count) without pulling any buffer's payload — the
+ * samples themselves load lazily, one group at a time, when a row is opened. */
+export async function countShadowDivergenceSamplesByChatId(
+  chatIds: number[]
+): Promise<{ chatId: number; count: number }[]> {
+  if (chatIds.length === 0) return [];
+  const pipeline = getRedis().pipeline();
+  for (const chatId of chatIds) pipeline.llen(shadowDivergenceKey(chatId));
+  // Default exec() returns the plain results in order ([n, n, …]); the
+  // {result,error} wrapper is only the `keepErrors: true` shape.
+  const counts = await pipeline.exec<number[]>();
+  return chatIds.map((chatId, i) => ({ chatId, count: counts[i] ?? 0 }));
 }

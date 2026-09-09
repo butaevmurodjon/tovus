@@ -3,6 +3,7 @@ import { authenticateRequest } from "@/lib/telegram/miniAppAuth";
 import { getApi } from "@/lib/telegram/api";
 import { isOwner } from "@/lib/owner";
 import { broadcastToAllGroups } from "@/lib/telegram/broadcast";
+import { recordOwnerAudit } from "@/lib/db/auditLog";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -18,5 +19,12 @@ export async function POST(req: Request) {
   if (text.length > 4000) return NextResponse.json({ error: "text_too_long" }, { status: 400 });
 
   const result = await broadcastToAllGroups(getApi(), text);
+  await recordOwnerAudit({
+    actorId: user.id,
+    action: "broadcast",
+    target: "все группы",
+    detail: text,
+    outcome: `${result.sent}/${result.total} доставлено${result.failed ? `, ${result.failed} ошибок` : ""}`,
+  });
   return NextResponse.json(result);
 }

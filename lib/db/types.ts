@@ -135,6 +135,20 @@ export interface JournalEntry {
   escalated: boolean;
   timestamp: number;
   restored: boolean;
+  /** §10.1.1 "почему сработало": a content-only re-run of the v2 spam scorer
+   * (scoring.ts `collectSpamSignals` + `scoreSignals`) done at journal-write
+   * time, purely to explain the entry. It is NOT what produced `action` (the
+   * live pipeline is rule-based, not scored) and NOT the same number the
+   * shadow screen shows — reputation/new-account modifiers are deliberately
+   * excluded here (same rationale as corpusCollector: a feature of the message
+   * alone). Empty `signals` is normal for profanity/flood/night-mode/
+   * restricted-content verdicts, which `collectSpamSignals` doesn't model.
+   * All three absent on entries written before this was added. */
+  score?: number;
+  signals?: { name: string; weight: number }[];
+  /** Which `moderateMessage` detector produced the verdict: "spam-detector",
+   * "profanity", "flood", "premium-ai", "restricted-content", "night-mode". */
+  source?: string | null;
 }
 
 export interface StatsBucket {

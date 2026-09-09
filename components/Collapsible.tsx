@@ -5,19 +5,29 @@ import { useState } from "react";
 export function Collapsible({
   title,
   defaultOpen = false,
+  onOpen,
   children,
 }: {
   title: string;
   defaultOpen?: boolean;
+  /** Fired each time the section transitions closed → open. Used by the
+   * shadow samples list to fetch a group's page only when it's first opened. */
+  onOpen?: () => void;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next) onOpen?.();
+  }
 
   return (
     <div>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         className="flex w-full items-center justify-between py-1"
         aria-expanded={open}
       >

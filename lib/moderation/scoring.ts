@@ -21,6 +21,8 @@ import {
   hostnameOf,
 } from "./textSignals";
 import { isNightModeActive } from "./nightMode";
+import { buildAllowlistMatcher } from "./allowlist";
+import { getAllowlist } from "@/lib/db/allowlist";
 import { getReputationScore } from "./reputation";
 import { isWithinNewMemberWindow, peekDuplicateFloodCount, peekUserFloodCount } from "./flood";
 import { classifyDivergence, recordShadowScoring, type DivergenceSample } from "@/lib/db/shadowStats";
@@ -84,8 +86,9 @@ function zoneFor(score: number): Zone {
 
 /** Collects every spam-related signal that matches, with §4.4's weights. Pure
  * function of the message — no Redis, safe to call unconditionally. */
-export function collectSpamSignals(message: Message): Signal[] {
+export function collectSpamSignals(message: Message, allowlist: string[] = []): Signal[] {
   const signals: Signal[] = [];
+  const allow = buildAllowlistMatcher(allowlist);
 
   const dangerousFile = findDangerousFileTag(message);
   if (dangerousFile) {
@@ -99,19 +102,24 @@ export function collectSpamSignals(message: Message): Signal[] {
   const quote = extractQuote(message);
   if (quote) {
     const quoteLower = quote.text.toLowerCase();
-    const quoteScamPattern = SCAM_PATTERNS.find((phrase) => quoteLower.includes(phrase));
+    const quoteScamPattern = SCAM_PATTERNS.find(
+      (phrase) => quoteLower.includes(phrase) && !allow.allowsPhrase(phrase)
+    );
     if (quoteScamPattern) {
       signals.push({ name: "quote_scam_pattern", weight: 90, evidence: quoteScamPattern, group: "link-risk" });
     }
     const quoteLinks = extractLinks(quote.text, quote.entities);
     for (const link of quoteLinks) {
       const host = hostnameOf(link);
+      if (allow.allowsLink(link)) continue;
       if (host && DOMAIN_BLACKLIST.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
         signals.push({ name: "quote_blacklisted_domain", weight: 85, evidence: host, group: "link-risk" });
         break;
       }
     }
-    const quotePromo = QUOTE_AD_MARKERS.find((phrase) => quoteLower.includes(phrase));
+    const quotePromo = QUOTE_AD_MARKERS.find(
+      (phrase) => quoteLower.includes(phrase) && !allow.allowsPhrase(phrase)
+    );
     if (quotePromo) {
       signals.push({ name: "quote_ad_relay", weight: 75, evidence: quotePromo, group: "link-risk" });
     } else if (containsCta(quote.text)) {
@@ -126,20 +134,23 @@ export function collectSpamSignals(message: Message): Signal[] {
   if (!text) return signals;
   const entities = message.entities ?? message.caption_entities;
 
-  const scamPattern = SCAM_PATTERNS.find((phrase) => text.toLowerCase().includes(phrase));
+  const scamPattern = SCAM_PATTERNS.find(
+    (phrase) => text.toLowerCase().includes(phrase) && !allow.allowsPhrase(phrase)
+  );
   if (scamPattern) {
     signals.push({ name: "scam_pattern", weight: 90, evidence: scamPattern, group: "link-risk" });
   }
 
-  const links = extractLinks(text, entities);
+  const allLinks = extractLinks(text, entities);
+  const links = allow.empty ? allLinks : allLinks.filter((l) => !allow.allowsLink(l));
 
   const maskedHost = findMaskedLinkHost(text, entities);
-  if (maskedHost) {
+  if (maskedHost && !allow.allowsHost(maskedHost)) {
     signals.push({ name: "masked_link", weight: 90, evidence: maskedHost, group: "link-risk" });
   }
 
   const cloakedBotLink = findCloakedBotLink(text, entities);
-  if (cloakedBotLink) {
+  if (cloakedBotLink && !allow.allowsHost(cloakedBotLink)) {
     signals.push({ name: "cloaked_bot_link", weight: 90, evidence: cloakedBotLink, group: "link-risk" });
   }
 
@@ -189,6 +200,20 @@ export function collectSpamSignals(message: Message): Signal[] {
 }
 
 // --- Scoring (§4.5, §4.7, §4.11) --------------------------------------------
+
+/** The subset of `signals` that actually contributes to the score: every
+ * standalone signal, plus only the single highest-weight "link-risk" signal
+ * (§4.11 — the group members are one risk seen several ways, not independent
+ * facts). Mirrors `scoreSignals`'s own groupMax/additive split. The journal's
+ * "почему сработало" list uses this so the shown weights line up with the
+ * score; the owner shadow screen keeps the full match list for calibration. */
+export function countedSignals(signals: Signal[]): Signal[] {
+  const standalone = signals.filter((s) => s.group !== "link-risk");
+  const topLinkRisk = signals
+    .filter((s) => s.group === "link-risk")
+    .sort((a, b) => b.weight - a.weight)[0];
+  return topLinkRisk ? [...standalone, topLinkRisk] : standalone;
+}
 
 /** Sums signals per §4.11: only the highest-weight "link-risk" signal counts
  * (they're evidence of the same underlying risk, not independent facts), all
@@ -316,7 +341,8 @@ export async function runShadowScoring(
   // mode would actually cost (§2's p95 ≤250ms budget), not for shadow mode's
   // own (strictly larger) overhead.
   const startedAt = performance.now();
-  const signals = collectSpamSignals(message);
+  const allowlist = await getAllowlist(settings.chatId).catch(() => []);
+  const signals = collectSpamSignals(message, allowlist);
   const text = message.text ?? message.caption ?? "";
   // Promise.all rather than a single Redis pipeline: these four reads cross
   // three modules (reputation.ts, flood.ts x3), and reaching into their key

@@ -4,6 +4,7 @@ import { getApi } from "@/lib/telegram/api";
 import { isOwner } from "@/lib/owner";
 import { authorizeOwnerAction, ownerActionErrorStatus } from "@/lib/telegram/ownerActions";
 import { deleteLastMessage } from "@/lib/telegram/messageCleanup";
+import { groupAuditLabel, recordOwnerAudit } from "@/lib/db/auditLog";
 
 export const runtime = "nodejs";
 
@@ -32,12 +33,15 @@ export async function POST(
   const access = await authorizeOwnerAction(api, chatId, "ban");
   if (!access.ok) return NextResponse.json({ error: access.error }, { status: 403 });
 
+  const target = `user ${userId} · ${await groupAuditLabel(chatId)}`;
   try {
     await api.banChatMember(chatId, userId);
     await deleteLastMessage(api, chatId, userId);
+    await recordOwnerAudit({ actorId: user.id, action: "group_ban", target });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("Manual owner ban failed:", err);
+    await recordOwnerAudit({ actorId: user.id, action: "group_ban", target, outcome: "ошибка" });
     return NextResponse.json({ error: "ban_failed" }, { status: ownerActionErrorStatus(err) });
   }
 }

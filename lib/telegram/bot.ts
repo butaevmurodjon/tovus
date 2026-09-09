@@ -1,7 +1,8 @@
 import { Bot, webhookCallback } from "grammy";
 import { after } from "next/server";
 import type { Message, User } from "grammy/types";
-import { getGroupSettings, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
+import { getGroupSettings, isRegisteredGroup, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
+import { recordGroupEvent } from "@/lib/db/groupEvents";
 import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
 import { incrementActivity, incrementHourlyActivity, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
@@ -69,14 +70,18 @@ export function getBot(): Bot {
     const newMember = update.new_chat_member;
 
     if (newMember.status === "member" || newMember.status === "administrator") {
+      const wasRegistered = await isRegisteredGroup(chat.id).catch(() => true);
       await registerGroup(chat.id, chat.title ?? "", detectLang(update.from.language_code));
+      if (!wasRegistered) await recordGroupEvent("added", chat.id, chat.title ?? "");
       // Seed the admin reverse index from scratch — we have no history of who
       // was already admin before the bot joined/was promoted, so this is the
       // only way to learn it. Ongoing changes are tracked incrementally below.
       await syncGroupAdmins(ctx.api, chat.id).catch(() => {});
     } else if (newMember.status === "left" || newMember.status === "kicked") {
+      const wasRegistered = await isRegisteredGroup(chat.id).catch(() => false);
       await unregisterGroup(chat.id);
       await clearGroupAdmins(chat.id).catch(() => {});
+      if (wasRegistered) await recordGroupEvent("removed", chat.id, chat.title ?? "");
       return;
     }
 

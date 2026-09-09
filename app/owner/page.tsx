@@ -8,11 +8,23 @@ import { Badge } from "@/components/Badge";
 import { StatTile } from "@/components/StatTile";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { StatusScreen } from "@/components/StatusScreen";
+import { AuditLog } from "./AuditLog";
 import { formatPlanDate } from "@/lib/billing/plan";
 import type { OwnerGroupSummary } from "@/lib/db/types";
 
 interface OverviewResponse {
-  totals: { groups: number; proGroups: number; violationsToday: number; joinsToday: number };
+  totals: {
+    groups: number;
+    proGroups: number;
+    violationsToday: number;
+    joinsToday: number;
+    proConversion: number;
+    mrrStars: number;
+    newGroups7d: number;
+    newGroups30d: number;
+    churn7d: number | null;
+    churn30d: number | null;
+  };
   groups: OwnerGroupSummary[];
 }
 
@@ -60,6 +72,23 @@ export default function OwnerDashboardPage() {
         <StatTile label={t("miniapp.ownerStatJoinsToday")} value={data.totals.joinsToday} />
       </div>
 
+      <div className="grid grid-cols-2 gap-2.5">
+        <StatTile label={t("miniapp.ownerStatMrr")} value={`${data.totals.mrrStars.toLocaleString("ru-RU")} ⭐`} />
+        <StatTile label={t("miniapp.ownerStatConversion")} value={`${data.totals.proConversion}%`} />
+        <StatTile
+          label={t("miniapp.ownerStatNewGroups")}
+          value={`+${data.totals.newGroups7d} / +${data.totals.newGroups30d}`}
+        />
+        <StatTile
+          label={t("miniapp.ownerStatChurn")}
+          value={
+            data.totals.churn7d === null
+              ? t("miniapp.ownerNoData")
+              : `−${data.totals.churn7d} / −${data.totals.churn30d ?? 0}`
+          }
+        />
+      </div>
+
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -78,6 +107,8 @@ export default function OwnerDashboardPage() {
           { value: "joins", label: t("miniapp.ownerSortJoins") },
         ]}
       />
+
+      <AuditLog />
 
       <div className="flex flex-col gap-2">
         {groups.length === 0 && (

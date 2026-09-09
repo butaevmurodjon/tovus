@@ -57,7 +57,12 @@ export default function GroupJournalPage() {
       />
       {tab === "journal" && <JournalTab t={t} fetcher={fetcher} isOwner={isOwner} flash={flash} />}
       {tab === "whitelist" && <WhitelistTab t={t} flash={flash} />}
-      {tab === "words" && <WordFilterTab t={t} flash={flash} />}
+      {tab === "words" && (
+        <>
+          <WordFilterTab t={t} flash={flash} />
+          <AllowlistCard t={t} flash={flash} />
+        </>
+      )}
     </div>
   );
 }
@@ -78,6 +83,7 @@ function JournalTab({
   const [error, setError] = useState(false);
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const [banningId, setBanningId] = useState<string | null>(null);
+  const [trustingId, setTrustingId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,6 +132,26 @@ function JournalTab({
     }
   }
 
+  async function trust(entry: JournalEntry) {
+    const confirmed = await confirmAction(t("miniapp.trustConfirm", { name: entry.displayName }));
+    if (!confirmed) return;
+    haptic("medium");
+    setTrustingId(entry.id);
+    try {
+      await fetcher(`/api/miniapp/groups/${chatId}/whitelist`, {
+        method: "POST",
+        body: JSON.stringify({ userId: entry.userId }),
+      });
+      hapticNotify("success");
+      flash(t("miniapp.trustDone"));
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    } finally {
+      setTrustingId(null);
+    }
+  }
+
   if (error) return <StatusScreen title={t("miniapp.connectionError")} />;
   if (!entries) return <StatusScreen title={t("common.loading")} />;
 
@@ -146,6 +172,13 @@ function JournalTab({
     reasonLabel: t("miniapp.reasonLabel"),
     autoEscalated: t("miniapp.autoEscalatedBadge"),
     ban: t("miniapp.ownerBanUser"),
+    trust: t("miniapp.trustAction"),
+    signalsLabel: t("miniapp.signalsLabel"),
+    signalName: (name: string) => {
+      const key = `miniapp.signal_${name}`;
+      const translated = t(key);
+      return translated === key ? name : translated;
+    },
   };
 
   return (
@@ -164,6 +197,8 @@ function JournalTab({
           restoring={restoringId === entry.id}
           onBan={isOwner ? ban : undefined}
           banning={banningId === entry.id}
+          onTrust={trust}
+          trusting={trustingId === entry.id}
         />
       ))}
     </div>
@@ -298,6 +333,145 @@ function WhitelistTab({ t, flash }: { t: T; flash: (message: string) => void }) 
             onKeyDown={(e) => e.key === "Enter" && add()}
             placeholder={t("miniapp.whitelistAddPlaceholder")}
             inputMode="numeric"
+            className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+            style={{ borderColor: "var(--border-strong)" }}
+          />
+          <Button variant="secondary" onClick={add}>
+            {t("common.add")}
+          </Button>
+        </div>
+      </CardSection>
+    </Card>
+  );
+}
+
+/**
+ * Content allowlist — domains and phrases the spam/link/profanity heuristics
+ * must never flag. Distinct from the user-ID whitelist (WhitelistTab): this is
+ * about message content. Suppresses individual matched signals, not the whole
+ * verdict, so an allowed domain can't be used to smuggle other spam.
+ */
+function AllowlistCard({ t, flash }: { t: T; flash: (message: string) => void }) {
+  const { chatId } = useGroup();
+  const { fetcher } = useApp();
+  const [entries, setEntries] = useState<string[] | null>(null);
+  const [input, setInput] = useState("");
+
+  const fetchEntries = useCallback(
+    async () => (await fetcher<{ entries: string[] }>(`/api/miniapp/groups/${chatId}/allowlist`)).entries,
+    [chatId, fetcher]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchEntries()
+      .then((list) => !cancelled && setEntries(list))
+      .catch(() => !cancelled && setEntries([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchEntries]);
+
+  async function add() {
+    const entry = input.trim();
+    if (!entry) return;
+    haptic("light");
+    setInput("");
+    try {
+      await optimisticUpdate<string[] | null>(
+        setEntries,
+        (cur) => (cur ? Array.from(new Set([...cur, entry.toLowerCase()])).sort() : cur),
+        async () =>
+          (
+            await fetcher<{ entries: string[] }>(`/api/miniapp/groups/${chatId}/allowlist`, {
+              method: "POST",
+              body: JSON.stringify({ entry }),
+            })
+          ).entries,
+        fetchEntries
+      );
+    } catch (err) {
+      hapticNotify("error");
+      flash(err instanceof ApiError && err.status === 409 ? t("miniapp.allowlistCapReached") : t("miniapp.errorToast"));
+    }
+  }
+
+  async function remove(entry: string) {
+    try {
+      await optimisticUpdate<string[] | null>(
+        setEntries,
+        (cur) => (cur ? cur.filter((e) => e !== entry) : cur),
+        async () =>
+          (
+            await fetcher<{ entries: string[] }>(
+              `/api/miniapp/groups/${chatId}/allowlist?entry=${encodeURIComponent(entry)}`,
+              { method: "DELETE" }
+            )
+          ).entries,
+        fetchEntries
+      );
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
+  }
+
+  async function clearAll() {
+    const confirmed = await confirmAction(t("miniapp.confirmDeleteAllAllowlist"));
+    if (!confirmed) return;
+    haptic("medium");
+    try {
+      await optimisticUpdate<string[] | null>(
+        setEntries,
+        () => [],
+        async () => {
+          await fetcher(`/api/miniapp/groups/${chatId}/allowlist?all=1`, { method: "DELETE" });
+          return [];
+        },
+        fetchEntries
+      );
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
+  }
+
+  return (
+    <Card className="mt-3">
+      <CardSection title={t("miniapp.allowlistTitle")} subtitle={t("miniapp.allowlistHint")}>
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[12px]" style={{ color: "var(--ink-muted)" }}>
+            {entries?.length ?? 0}
+          </span>
+          {entries !== null && entries.length > 0 && (
+            <Button variant="danger" onClick={clearAll}>
+              {t("miniapp.deleteAll")}
+            </Button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {entries !== null && entries.length === 0 && (
+            <span className="text-[12px]" style={{ color: "var(--ink-muted)" }}>
+              —
+            </span>
+          )}
+          {(entries ?? []).map((entry) => (
+            <Badge key={entry} variant="neutral">
+              <span className="flex items-center gap-1.5">
+                {entry}
+                <button onClick={() => remove(entry)} aria-label={t("common.remove")} className="font-bold">
+                  ×
+                </button>
+              </span>
+            </Badge>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && add()}
+            placeholder={t("miniapp.allowlistAddPlaceholder")}
             className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
             style={{ borderColor: "var(--border-strong)" }}
           />

@@ -34,6 +34,8 @@ export function JournalItem({
   restoring,
   onBan,
   banning,
+  onTrust,
+  trusting,
 }: {
   entry: JournalEntry;
   labels: {
@@ -44,12 +46,22 @@ export function JournalItem({
     reasonLabel: string;
     autoEscalated: string;
     ban?: string;
+    /** "Больше не наказывать" — adds the user to the group whitelist. */
+    trust?: string;
+    /** §10.1.1 "почему сработало" — weighted signal breakdown. */
+    signalsLabel: string;
+    /** Internal signal name -> human label; falls back to the raw name. */
+    signalName: (name: string) => string;
   };
   onRestore: (id: string) => void;
   restoring: boolean;
   /** Owner-only: bans this entry's user across every group the bot manages. Omitted for non-owners. */
   onBan?: (entry: JournalEntry) => void;
   banning?: boolean;
+  /** Any group admin: whitelists this entry's user so the bot stops moderating
+   * their messages in this group. */
+  onTrust?: (entry: JournalEntry) => void;
+  trusting?: boolean;
 }) {
   return (
     <Card className="p-3.5">
@@ -72,9 +84,36 @@ export function JournalItem({
           {entry.text}
         </p>
       )}
-      <p className="text-[11px] mb-3" style={{ color: "var(--ink-muted)" }}>
+      <p className="text-[11px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
         {labels.reasonLabel}: {entry.reason}
       </p>
+
+      {/* Rendered only when the content re-derivation actually produced signals
+          — empty is normal for profanity/flood/etc. and would read as "flagged
+          for nothing" (see JournalEntry.score). */}
+      {entry.signals && entry.signals.length > 0 && (
+        <div className="mb-3 rounded-[var(--radius-sm)] px-2.5 py-2" style={{ background: "#f7f6f3" }}>
+          <p className="text-[10px] uppercase tracking-wide mb-1" style={{ color: "var(--ink-muted)" }}>
+            {labels.signalsLabel}
+          </p>
+          <ul className="flex flex-col gap-0.5">
+            {[...entry.signals]
+              .sort((a, b) => b.weight - a.weight)
+              .map((s, i) => (
+                <li
+                  key={`${s.name}-${i}`}
+                  className="flex items-baseline justify-between gap-2 text-[12px]"
+                  style={{ color: "var(--ink-secondary)" }}
+                >
+                  <span className="break-words">{labels.signalName(s.name)}</span>
+                  <span className="shrink-0 tabular-nums" style={{ color: "var(--ink-muted)" }}>
+                    +{s.weight}
+                  </span>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {entry.restored ? (
@@ -82,6 +121,11 @@ export function JournalItem({
         ) : (
           <Button variant="secondary" onClick={() => onRestore(entry.id)} disabled={restoring}>
             {labels.restore}
+          </Button>
+        )}
+        {onTrust && labels.trust && (
+          <Button variant="secondary" onClick={() => onTrust(entry)} disabled={trusting}>
+            {labels.trust}
           </Button>
         )}
         {onBan && labels.ban && (

@@ -4,7 +4,9 @@ export function StatTile({
   accent = false,
 }: {
   label: string;
-  value: number;
+  /** A pre-formatted string (e.g. "349 ⭐", "нет данных") is rendered as-is;
+   * a number gets locale grouping. */
+  value: number | string;
   accent?: boolean;
 }) {
   return (
@@ -16,7 +18,7 @@ export function StatTile({
         className="text-[22px] font-semibold leading-none mb-1.5"
         style={{ color: accent ? "var(--accent-strong)" : "var(--ink)", fontVariantNumeric: "tabular-nums" }}
       >
-        {value.toLocaleString("ru-RU")}
+        {typeof value === "number" ? value.toLocaleString("ru-RU") : value}
       </p>
       <p className="text-[12px]" style={{ color: "var(--ink-muted)" }}>
         {label}

@@ -41,6 +41,11 @@ export interface ModerationVerdict {
    * Purely additive metadata for the training corpus (corpusCollector.ts) —
    * never read by applyViolation/reputation.ts. */
   aiCategory?: "spam" | "profanity" | "scam" | "none";
+  /** The group's content allowlist as it was read for this verdict, so the
+   * journal's signal re-derivation (violations.ts) reuses it instead of a
+   * second Redis GET on the awaited webhook path. Absent for night-mode /
+   * restricted-content verdicts, which are decided before the allowlist read. */
+  contentAllowlist?: string[];
 }
 
 export async function moderateMessage(
@@ -116,7 +121,7 @@ export async function moderateMessage(
     const result = detectProfanity(text, customWords, contentAllowlist);
     if (result.matched) {
       const reason = result.source === "custom" ? "запрещённое слово (добавлено вручную)" : "нецензурная лексика";
-      return { category: "profanity", reason, forceWarnOnly: false, source: "profanity" };
+      return { category: "profanity", reason, forceWarnOnly: false, source: "profanity", contentAllowlist };
     }
   }
 
@@ -124,7 +129,7 @@ export async function moderateMessage(
     const spamResult = detectSpam(message, contentAllowlist);
     if (spamResult.matched) {
       const forceWarnOnly = isFirstMessage && spamResult.severity === "low" && !isKnownRepeatOffender;
-      return { category: "spam", reason: spamResult.reason ?? "спам", forceWarnOnly, source: "spam-detector" };
+      return { category: "spam", reason: spamResult.reason ?? "спам", forceWarnOnly, source: "spam-detector", contentAllowlist };
     }
 
     // Flood counters model the RATE of message events, not their content — an
@@ -145,10 +150,11 @@ export async function moderateMessage(
           reason: "флуд: слишком много сообщений подряд",
           forceWarnOnly: false,
           source: "flood",
+          contentAllowlist,
         };
       }
       if (dupFlood) {
-        return { category: "spam", reason: "флуд: повторяющееся сообщение", forceWarnOnly: false, source: "flood" };
+        return { category: "spam", reason: "флуд: повторяющееся сообщение", forceWarnOnly: false, source: "flood", contentAllowlist };
       }
     }
   }
@@ -194,6 +200,7 @@ export async function moderateMessage(
         forceWarnOnly,
         source: "premium-ai",
         aiCategory: verdict.category,
+        contentAllowlist,
       };
     }
   }

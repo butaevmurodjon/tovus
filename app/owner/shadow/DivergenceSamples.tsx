@@ -41,6 +41,10 @@ interface GroupState {
   samples: Sample[];
   loading: boolean;
   failed: boolean;
+  /** No more pages: the last fetch returned a short page or brought no new
+   * rows (the lpush/ltrim buffer can plateau `loaded` below the stale index
+   * `count`, so we can't rely on `loaded < count` alone). */
+  exhausted: boolean;
 }
 
 const LABELS: GoldLabel[] = ["spam", "scam", "profanity", "none"];
@@ -81,7 +85,10 @@ export function DivergenceSamples() {
     async (chatId: number, offset: number) => {
       setGroups((cur) => {
         if (cur[chatId]?.loading) return cur;
-        return { ...cur, [chatId]: { samples: cur[chatId]?.samples ?? [], loading: true, failed: false } };
+        return {
+          ...cur,
+          [chatId]: { samples: cur[chatId]?.samples ?? [], loading: true, failed: false, exhausted: false },
+        };
       });
       try {
         const page = await fetcher<PageResponse>(
@@ -92,13 +99,22 @@ export function DivergenceSamples() {
           // The buffer is lpush/ltrim, so it can shift between the index read
           // and this page — dedupe by messageId rather than trust the offset.
           const seen = new Set(prev.map((s) => s.messageId));
-          const merged = [...prev, ...page.samples.filter((s) => !seen.has(s.messageId))];
-          return { ...cur, [chatId]: { samples: merged, loading: false, failed: false } };
+          const fresh = page.samples.filter((s) => !seen.has(s.messageId));
+          const merged = [...prev, ...fresh];
+          // Stop offering "показать ещё" once a page comes back short or adds
+          // nothing new — otherwise the button lingers forever, each click a no-op.
+          const exhausted = page.samples.length < page.pageSize || fresh.length === 0;
+          return { ...cur, [chatId]: { samples: merged, loading: false, failed: false, exhausted } };
         });
       } catch {
         setGroups((cur) => ({
           ...cur,
-          [chatId]: { samples: cur[chatId]?.samples ?? [], loading: false, failed: true },
+          [chatId]: {
+            samples: cur[chatId]?.samples ?? [],
+            loading: false,
+            failed: true,
+            exhausted: cur[chatId]?.exhausted ?? false,
+          },
         }));
       }
     },
@@ -211,7 +227,7 @@ export function DivergenceSamples() {
                       </p>
                     )}
 
-                    {state && !state.loading && (loaded < group.count || state.failed) && (
+                    {state && !state.loading && ((loaded < group.count && !state.exhausted) || state.failed) && (
                       <button
                         type="button"
                         onClick={() => loadPage(group.chatId, loaded)}

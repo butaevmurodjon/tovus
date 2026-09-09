@@ -88,7 +88,10 @@ async function logToJournal(
   // a Promise.all with in applyViolation).
   let score: number | undefined;
   let signals: { name: string; weight: number }[] = [];
-  const allowlist = await getAllowlist(chatId).catch(() => []);
+  // Reuse the allowlist moderateMessage already read for this verdict; only
+  // fall back to a fresh GET for verdicts decided before that read (night-mode,
+  // restricted-content) — those re-derive to an empty signal list anyway.
+  const allowlist = verdict.contentAllowlist ?? (await getAllowlist(chatId).catch(() => []));
   try {
     const collected = collectSpamSignals(message, allowlist);
     score = scoreSignals(collected, 0, false).score;

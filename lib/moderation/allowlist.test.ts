@@ -47,4 +47,11 @@ describe("detectProfanity with allowlist", () => {
     expect(detectProfanity("это лох", ["лох"]).matched).toBe(true);
     expect(detectProfanity("это лох", ["лох"], ["это лох"]).matched).toBe(false);
   });
+
+  it("one allowlisted custom-word hit does not suppress a different banned word later", () => {
+    // "скидка" is covered by the allowlisted phrase, "дурак" is not
+    const r = detectProfanity("скидка дня и ты дурак", ["скидка", "дурак"], ["скидка дня"]);
+    expect(r.matched).toBe(true);
+    expect(r.snippet).toContain("дурак");
+  });
 });

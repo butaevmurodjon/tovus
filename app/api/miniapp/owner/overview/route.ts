@@ -48,15 +48,15 @@ export async function GET(req: Request) {
   // Churn comes from the groupEvents log, which only started recording from its
   // deploy forward. Until an event exists, report null (UI shows «нет данных»)
   // rather than 0, which would read as "no churn".
-  const [eventsExist, removed7d, removed30d] = await Promise.all([
+  // One full read of the 30d window; the 7d count is a subset derived in memory.
+  const [eventsExist, events30d] = await Promise.all([
     hasGroupEvents().catch(() => false),
-    getGroupEvents(now - 7 * DAY_MS)
-      .then((e) => e.filter((x) => x.type === "removed").length)
-      .catch(() => 0),
-    getGroupEvents(now - 30 * DAY_MS)
-      .then((e) => e.filter((x) => x.type === "removed").length)
-      .catch(() => 0),
+    getGroupEvents(now - 30 * DAY_MS).catch(() => []),
   ]);
+  const removed30d = events30d.filter((x) => x.type === "removed").length;
+  const removed7d = events30d.filter(
+    (x) => x.type === "removed" && x.ts >= now - 7 * DAY_MS
+  ).length;
 
   return NextResponse.json({
     totals: {

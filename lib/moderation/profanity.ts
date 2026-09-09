@@ -135,8 +135,12 @@ export function detectProfanity(
 
   const customRegex = buildCustomWordsRegex(customWords);
   if (customRegex) {
-    const match = text.match(customRegex);
-    if (match && !(allowed.length > 0 && isAllowed(match[0]))) {
+    // matchAll + per-match check, like the dictionary loop above — one
+    // allowlisted hit must not suppress a different banned word later in the
+    // same message.
+    for (const match of text.matchAll(customRegex)) {
+      const word = enclosingWord(text, match.index, match[0].length);
+      if (allowed.length > 0 && (isAllowed(match[0]) || isAllowed(word))) continue;
       return { matched: true, snippet: match[0], source: "custom" };
     }
   }

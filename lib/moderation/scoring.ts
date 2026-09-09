@@ -341,20 +341,21 @@ export async function runShadowScoring(
   // mode would actually cost (§2's p95 ≤250ms budget), not for shadow mode's
   // own (strictly larger) overhead.
   const startedAt = performance.now();
-  const allowlist = await getAllowlist(settings.chatId).catch(() => []);
-  const signals = collectSpamSignals(message, allowlist);
   const text = message.text ?? message.caption ?? "";
-  // Promise.all rather than a single Redis pipeline: these four reads cross
-  // three modules (reputation.ts, flood.ts x3), and reaching into their key
-  // builders to batch one HTTP round trip isn't worth breaking that
-  // encapsulation for — this still dispatches all four concurrently instead
-  // of serially.
-  const [reputationScore, userFloodCount, dupFloodCount, isNewAccount] = await Promise.all([
+  // Promise.all rather than a single Redis pipeline: these reads cross several
+  // modules (allowlist.ts, reputation.ts, flood.ts x3), and reaching into their
+  // key builders to batch one HTTP round trip isn't worth breaking that
+  // encapsulation for — this still dispatches them concurrently instead of
+  // serially. getAllowlist belongs here too: doing it before the Promise.all
+  // would add one serial RTT to latencyMs, which is the §11.4 p95 gate.
+  const [allowlist, reputationScore, userFloodCount, dupFloodCount, isNewAccount] = await Promise.all([
+    getAllowlist(settings.chatId).catch(() => [] as string[]),
     getReputationScore(settings.chatId, userId).catch(() => 0),
     peekUserFloodCount(settings.chatId, userId).catch(() => 0),
     peekDuplicateFloodCount(settings.chatId, text).catch(() => 0),
     isWithinNewMemberWindow(settings.chatId, userId).catch(() => false),
   ]);
+  const signals = collectSpamSignals(message, allowlist);
   // §4.4: flat weights when the real pipeline's own trip conditions
   // (checkUserFlood/checkDuplicateFlood) would have fired, mirrored exactly
   // so the shadow number means the same thing the real threshold does.

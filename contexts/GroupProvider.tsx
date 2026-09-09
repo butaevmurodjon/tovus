@@ -12,6 +12,17 @@ interface GroupStatusFields {
   missingPermissions: string[];
   memberCount: number | null;
   proFeaturesEligible: boolean;
+  /** For the §6.5 priority-5 overview card. Both come only from GET (PATCH
+   * doesn't recompute them — no settings patch changes either), so they fall
+   * back to the previous value below whenever a response omits them. Same
+   * staleness tradeoff as memberCount/missingPermissions above: this
+   * provider lives in layout.tsx and outlives the settings page, so
+   * whitelisting someone (or a new violation landing) on another tab under
+   * the same group does NOT refresh these until the next full `load()` —
+   * i.e. next mount of GroupProvider itself, or an explicit `refresh()`.
+   * A snapshot-on-open glance, not a live counter. */
+  whitelistCount: number;
+  violationsToday: number;
 }
 
 interface GroupContextValue extends GroupStatusFields {
@@ -30,7 +41,13 @@ interface GroupContextValue extends GroupStatusFields {
 
 const GroupContext = createContext<GroupContextValue | null>(null);
 
-const EMPTY_STATUS: GroupStatusFields = { missingPermissions: [], memberCount: null, proFeaturesEligible: true };
+const EMPTY_STATUS: GroupStatusFields = {
+  missingPermissions: [],
+  memberCount: null,
+  proFeaturesEligible: true,
+  whitelistCount: 0,
+  violationsToday: 0,
+};
 
 export function GroupProvider({ chatId, children }: { chatId: number; children: React.ReactNode }) {
   const { status: appStatus, fetcher } = useApp();
@@ -55,6 +72,8 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
           missingPermissions: data.missingPermissions ?? [],
           memberCount: data.memberCount ?? null,
           proFeaturesEligible: data.proFeaturesEligible ?? true,
+          whitelistCount: data.whitelistCount ?? 0,
+          violationsToday: data.violationsToday ?? 0,
         });
         setStatus("ready");
       })
@@ -91,16 +110,21 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
         setSettings,
         (cur) => (cur ? { ...cur, ...patch } : cur),
         async () => {
-          const data = await fetcher<{ settings: GroupSettings; rejected?: string[] } & GroupStatusFields>(
-            `/api/miniapp/groups/${chatId}`,
-            { method: "PATCH", body: JSON.stringify(patch) }
-          );
+          const data = await fetcher<
+            { settings: GroupSettings; rejected?: string[] } & Partial<GroupStatusFields>
+          >(`/api/miniapp/groups/${chatId}`, { method: "PATCH", body: JSON.stringify(patch) });
           rejected = data.rejected ?? [];
-          setStatusFields({
-            missingPermissions: data.missingPermissions ?? [],
-            memberCount: data.memberCount ?? null,
-            proFeaturesEligible: data.proFeaturesEligible ?? true,
-          });
+          // PATCH returns memberCount + proFeaturesEligible but not
+          // missingPermissions (that needs uncached getBotPermissions calls not
+          // worth paying per toggle) — keep the prior value for any field the
+          // response omits instead of wiping it until the next full refresh.
+          setStatusFields((prev) => ({
+            missingPermissions: data.missingPermissions ?? prev.missingPermissions,
+            memberCount: data.memberCount ?? prev.memberCount,
+            proFeaturesEligible: data.proFeaturesEligible ?? prev.proFeaturesEligible,
+            whitelistCount: data.whitelistCount ?? prev.whitelistCount,
+            violationsToday: data.violationsToday ?? prev.violationsToday,
+          }));
           return data.settings;
         },
         fetchSettings

@@ -9,11 +9,18 @@ import { Toggle } from "@/components/Toggle";
 import { SegmentedControl } from "@/components/SegmentedControl";
 import { Button } from "@/components/Button";
 import { Badge } from "@/components/Badge";
+import { StatTile } from "@/components/StatTile";
 import { PermissionWarning } from "@/components/PermissionWarning";
 import { Collapsible } from "@/components/Collapsible";
 import { haptic, hapticNotify, openInvoice } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
 import { isProActive, formatPlanDate, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
+import {
+  STRICTNESS_LEVELS,
+  STRICTNESS_PRESETS,
+  detectStrictnessLevel,
+  type StrictnessLevel,
+} from "@/lib/moderation/strictnessPresets";
 import type { GroupSettings } from "@/lib/db/types";
 
 const WARN_LIMIT_PRESETS = [3, 5, 10];
@@ -35,7 +42,16 @@ function extendExpiry(currentExpiresAt: number | null, active: boolean, days: nu
 
 export default function GroupSettingsPage() {
   const { t, fetcher, lang, isOwner } = useApp();
-  const { settings, missingPermissions, proFeaturesEligible, updateSettings, chatId, refresh } = useGroup();
+  const {
+    settings,
+    missingPermissions,
+    proFeaturesEligible,
+    whitelistCount,
+    violationsToday,
+    updateSettings,
+    chatId,
+    refresh,
+  } = useGroup();
   const [toast, setToast] = useState<string | null>(null);
   const [logChannelInput, setLogChannelInput] = useState(settings?.logChannelId?.toString() ?? "");
   const [welcomeInput, setWelcomeInput] = useState(settings?.welcomeMessage ?? "");
@@ -162,10 +178,10 @@ export default function GroupSettingsPage() {
   async function toggleProFeature(key: "captchaEnabled" | "antiraidEnabled" | "federationEnabled", value: boolean) {
     haptic("light");
     try {
-      // A single-key patch that's ineligible always empties the server's patch
-      // and throws 402 today (caught below) — but `rejected` is also checked
-      // here so this keeps working correctly if this ever becomes part of a
-      // multi-field patch, where a rejection comes back as a 200 instead.
+      // The server strips any ineligible gated key from the patch and echoes it
+      // back in `rejected` with a 200 (not a 402) — surfaced as the "locked"
+      // toast below. Same handling holds inside a future multi-field patch,
+      // where the accepted fields still apply.
       const rejected = await updateSettings({ [key]: value } as never);
       if (rejected.includes(key)) {
         hapticNotify("error");
@@ -179,6 +195,28 @@ export default function GroupSettingsPage() {
         hapticNotify("error");
         flash(t("miniapp.errorToast"));
       }
+    }
+  }
+
+  // §6.5 priority 5: one tap sets the whole bundle in strictnessPresets.ts.
+  // Every field a preset touches is deliberately free/ungated (see that
+  // file's comment), but `rejected` is still checked rather than assumed
+  // empty — the field list can grow, and updateSettings resolving with a
+  // partial rejection (not throwing) is exactly how a silently-dropped field
+  // would slip through otherwise, same as toggleProFeature above.
+  async function applyStrictness(level: StrictnessLevel) {
+    haptic("medium");
+    try {
+      const rejected = await updateSettings(STRICTNESS_PRESETS[level]);
+      if (rejected.length > 0) {
+        hapticNotify("error");
+        flash(t("miniapp.proLockedHint", { limit: FREE_TIER_MAX_MEMBERS }));
+        return;
+      }
+      flash(t("miniapp.savedToast"));
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
     }
   }
 
@@ -296,6 +334,12 @@ export default function GroupSettingsPage() {
         label: String(n),
       }));
 
+  // Overview status card (§6.5 priority 5): "protection" is the base
+  // content-filtering layer (profanity/spam) — deliberately not tied to
+  // casCheck/premium/captcha, which are opt-in refinements on top of it.
+  const protectionOn = settings.profanityFilter || settings.antispam;
+  const currentStrictness = detectStrictnessLevel(settings);
+
   return (
     <div className="px-4 py-4 flex flex-col gap-3">
       {toast && (
@@ -306,6 +350,25 @@ export default function GroupSettingsPage() {
           {toast}
         </div>
       )}
+
+      <Card>
+        <CardSection title={t("miniapp.overviewTitle")}>
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            <Badge variant={protectionOn ? "good" : "warning"}>
+              {protectionOn ? t("miniapp.overviewProtectionOn") : t("miniapp.overviewProtectionOff")}
+            </Badge>
+            <Badge variant={missingPermissions.length === 0 ? "good" : "critical"}>
+              {missingPermissions.length === 0
+                ? t("miniapp.overviewPermissionsOk")
+                : t("miniapp.overviewPermissionsIssue")}
+            </Badge>
+          </div>
+          <div className="grid grid-cols-2 gap-2.5">
+            <StatTile label={t("miniapp.ownerStatViolationsToday")} value={violationsToday} accent />
+            <StatTile label={t("miniapp.overviewWhitelistCount")} value={whitelistCount} />
+          </div>
+        </CardSection>
+      </Card>
 
       <PermissionWarning missing={missingPermissions} action={settings.action} t={t} />
 
@@ -353,7 +416,27 @@ export default function GroupSettingsPage() {
       )}
 
       <Card>
-        <CardSection>
+        <CardSection title={t("miniapp.strictnessTitle")} subtitle={t("miniapp.strictnessHint")}>
+          <SegmentedControl
+            value={currentStrictness}
+            onChange={applyStrictness}
+            columns={STRICTNESS_LEVELS.length}
+            options={[
+              { value: "mild", label: t("miniapp.strictnessMild") },
+              { value: "balanced", label: t("miniapp.strictnessBalanced") },
+              { value: "strict", label: t("miniapp.strictnessStrict") },
+            ]}
+          />
+          {currentStrictness === null && (
+            <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.strictnessCustomHint")}
+            </p>
+          )}
+        </CardSection>
+      </Card>
+
+      <Card>
+        <CardSection title={t("miniapp.sectionProtection")}>
           <Row label={t("miniapp.filterProfanity")}>
             <Toggle checked={settings.profanityFilter} onChange={(v) => setField("profanityFilter", v)} />
           </Row>
@@ -369,38 +452,12 @@ export default function GroupSettingsPage() {
             {t("miniapp.casCheckHint")}
           </p>
           <Divider />
-          <Row label={t("miniapp.deleteServiceMessagesTitle")}>
-            <Toggle
-              checked={settings.deleteServiceMessages}
-              onChange={(v) => setField("deleteServiceMessages", v)}
-            />
+          <Row label={t("miniapp.premiumMode")}>
+            <Toggle checked={settings.premium} onChange={(v) => setField("premium", v)} />
           </Row>
           <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.deleteServiceMessagesHint")}
+            {t("miniapp.premiumHint")}
           </p>
-          <Divider />
-          <Row label={t("miniapp.restrictNewMembersTitle")}>
-            <Toggle
-              checked={settings.restrictNewMembersEnabled}
-              onChange={(v) => setField("restrictNewMembersEnabled", v)}
-            />
-          </Row>
-          <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.restrictNewMembersHint")}
-          </p>
-          {settings.restrictNewMembersEnabled && (
-            <div className="mb-2">
-              <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                {t("miniapp.restrictNewMembersMinutesLabel")}
-              </p>
-              <SegmentedControl
-                value={String(settings.restrictNewMembersMinutes)}
-                onChange={(v) => setField("restrictNewMembersMinutes", Number(v))}
-                columns={restrictMinutesOptions.length}
-                options={restrictMinutesOptions}
-              />
-            </div>
-          )}
           <Divider />
           <Row label={t("miniapp.nightModeTitle")}>
             <Toggle checked={settings.nightModeEnabled} onChange={(v) => setField("nightModeEnabled", v)} />
@@ -449,17 +506,48 @@ export default function GroupSettingsPage() {
             </div>
           )}
           <Divider />
-          <Row label={t("miniapp.premiumMode")}>
-            <Toggle checked={settings.premium} onChange={(v) => setField("premium", v)} />
+          <Row label={t("miniapp.deleteServiceMessagesTitle")}>
+            <Toggle
+              checked={settings.deleteServiceMessages}
+              onChange={(v) => setField("deleteServiceMessages", v)}
+            />
           </Row>
           <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.premiumHint")}
+            {t("miniapp.deleteServiceMessagesHint")}
           </p>
         </CardSection>
       </Card>
 
       <Card>
-        <CardSection title={t("miniapp.violationAction")}>
+        <CardSection title={t("miniapp.sectionNewMembers")}>
+          <Row label={t("miniapp.restrictNewMembersTitle")}>
+            <Toggle
+              checked={settings.restrictNewMembersEnabled}
+              onChange={(v) => setField("restrictNewMembersEnabled", v)}
+            />
+          </Row>
+          <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
+            {t("miniapp.restrictNewMembersHint")}
+          </p>
+          {settings.restrictNewMembersEnabled && (
+            <div>
+              <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                {t("miniapp.restrictNewMembersMinutesLabel")}
+              </p>
+              <SegmentedControl
+                value={String(settings.restrictNewMembersMinutes)}
+                onChange={(v) => setField("restrictNewMembersMinutes", Number(v))}
+                columns={restrictMinutesOptions.length}
+                options={restrictMinutesOptions}
+              />
+            </div>
+          )}
+        </CardSection>
+      </Card>
+
+      <Card>
+        <CardSection title={t("miniapp.sectionPunishments")}>
+          <SubLabel>{t("miniapp.violationAction")}</SubLabel>
           <SegmentedControl
             value={settings.action}
             onChange={(action) => setField("action", action)}
@@ -471,60 +559,59 @@ export default function GroupSettingsPage() {
               { value: "ban", label: t("miniapp.actionBan") },
             ]}
           />
-        </CardSection>
-      </Card>
 
-      <Card>
-        <CardSection>
-          <Row label={t("miniapp.warnEscalationTitle")}>
-            <Toggle
-              checked={settings.warnEscalationEnabled}
-              onChange={(v) => setField("warnEscalationEnabled", v)}
+          <Divider />
+          <div className="mt-3">
+            <Row label={t("miniapp.warnEscalationTitle")}>
+              <Toggle
+                checked={settings.warnEscalationEnabled}
+                onChange={(v) => setField("warnEscalationEnabled", v)}
+              />
+            </Row>
+            <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.warnEscalationHint")}
+            </p>
+            {settings.warnEscalationEnabled && (
+              <>
+                <div className="mt-3">
+                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                    {t("miniapp.warnLimitLabel")}
+                  </p>
+                  <SegmentedControl
+                    value={String(settings.warnLimit)}
+                    onChange={(v) => setField("warnLimit", Number(v))}
+                    columns={WARN_LIMIT_PRESETS.includes(settings.warnLimit) ? 3 : 4}
+                    options={warnLimitOptions}
+                  />
+                </div>
+                <div className="mt-3">
+                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                    {t("miniapp.warnActionLabel")}
+                  </p>
+                  <SegmentedControl
+                    value={settings.warnAction}
+                    onChange={(action) => setField("warnAction", action)}
+                    columns={2}
+                    options={[
+                      { value: "mute", label: t("miniapp.actionMute") },
+                      { value: "ban", label: t("miniapp.actionBan") },
+                    ]}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          <Divider />
+          <div className="mt-3">
+            <SubLabel subtitle={t("miniapp.voteBanHint")}>{t("miniapp.voteBanTitle")}</SubLabel>
+            <SegmentedControl
+              value={String(settings.voteBanThreshold)}
+              onChange={(v) => setField("voteBanThreshold", Number(v))}
+              columns={voteBanThresholdOptions.length}
+              options={voteBanThresholdOptions}
             />
-          </Row>
-          <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.warnEscalationHint")}
-          </p>
-          {settings.warnEscalationEnabled && (
-            <>
-              <div className="mt-3">
-                <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                  {t("miniapp.warnLimitLabel")}
-                </p>
-                <SegmentedControl
-                  value={String(settings.warnLimit)}
-                  onChange={(v) => setField("warnLimit", Number(v))}
-                  columns={WARN_LIMIT_PRESETS.includes(settings.warnLimit) ? 3 : 4}
-                  options={warnLimitOptions}
-                />
-              </div>
-              <div className="mt-3">
-                <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                  {t("miniapp.warnActionLabel")}
-                </p>
-                <SegmentedControl
-                  value={settings.warnAction}
-                  onChange={(action) => setField("warnAction", action)}
-                  columns={2}
-                  options={[
-                    { value: "mute", label: t("miniapp.actionMute") },
-                    { value: "ban", label: t("miniapp.actionBan") },
-                  ]}
-                />
-              </div>
-            </>
-          )}
-        </CardSection>
-      </Card>
-
-      <Card>
-        <CardSection title={t("miniapp.voteBanTitle")} subtitle={t("miniapp.voteBanHint")}>
-          <SegmentedControl
-            value={String(settings.voteBanThreshold)}
-            onChange={(v) => setField("voteBanThreshold", Number(v))}
-            columns={voteBanThresholdOptions.length}
-            options={voteBanThresholdOptions}
-          />
+          </div>
         </CardSection>
       </Card>
 
@@ -735,4 +822,23 @@ function Row({ label, children }: { label: React.ReactNode; children: React.Reac
 
 function Divider() {
   return <div className="h-px" style={{ background: "var(--border)" }} />;
+}
+
+/** For a sub-block inside a CardSection that used to be its own titled Card
+ * (e.g. "Наказания" now bundles three of these) — mirrors CardSection's own
+ * title/subtitle classes exactly, so merging cards doesn't visually demote
+ * what reads as a section heading down to a plain muted field label. */
+function SubLabel({ children, subtitle }: { children: React.ReactNode; subtitle?: string }) {
+  return (
+    <>
+      <p className={`text-[13px] font-semibold ${subtitle ? "mb-0.5" : "mb-1.5"}`} style={{ color: "var(--ink)" }}>
+        {children}
+      </p>
+      {subtitle && (
+        <p className="text-[12px] mb-2" style={{ color: "var(--ink-muted)" }}>
+          {subtitle}
+        </p>
+      )}
+    </>
+  );
 }

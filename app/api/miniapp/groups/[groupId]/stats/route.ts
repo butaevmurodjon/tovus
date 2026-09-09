@@ -28,10 +28,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ groupId:
   const periodParam = url.searchParams.get("period");
   const period: StatsPeriod = periodParam === "today" || periodParam === "30d" ? periodParam : "7d";
 
-  // §15.6 B1: top-active-hours is the one Pro-gated card on this page — gated
-  // for real here (unlike proFeaturesEligible from GroupProvider, which is
-  // currently a hardcoded true pending a broader fix), same eligibility rule
-  // (Pro plan OR under the free-tier member grace) as captcha/antiraid.
+  // §15.6 B1: top-active-hours is the one Pro-gated card on this page, gated
+  // with the same eligibility rule (Pro plan OR under the free-tier member
+  // grace) as captcha/antiraid and the group settings route.
   const memberCount = await getCachedMemberCount(getApi(), chatId);
   const topHoursEligible = canUseProFeature(settings, memberCount);
 

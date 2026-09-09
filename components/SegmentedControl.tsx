@@ -6,7 +6,10 @@ export function SegmentedControl<T extends string>({
   onChange,
   columns,
 }: {
-  value: T;
+  /** Pass `null` when the caller can't map current state to any one option
+   * (e.g. a strictness preset picker where the group's settings match none
+   * of the presets) — no button highlights, instead of guessing wrong. */
+  value: T | null;
   options: { value: T; label: string }[];
   onChange: (value: T) => void;
   /** Grid columns per row. Defaults to one row (options.length) — pass e.g. 2 to wrap

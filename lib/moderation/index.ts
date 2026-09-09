@@ -1,6 +1,7 @@
 import type { Message } from "grammy/types";
 import type { GroupSettings, ViolationCategory } from "@/lib/db/types";
 import { getCustomWords } from "@/lib/db/customWords";
+import { getAllowlist } from "@/lib/db/allowlist";
 import { isProActive } from "@/lib/billing/plan";
 import { detectProfanity } from "./profanity";
 import { detectSpam, hasAnyLink } from "./spam";
@@ -104,9 +105,15 @@ export async function moderateMessage(
     }
   }
 
+  // Per-group content allowlist (domains + phrases the heuristics must never
+  // flag). Fetched once and shared by the profanity and spam paths below; it
+  // suppresses individual matched signals, never the whole verdict.
+  const contentAllowlist =
+    settings.profanityFilter || settings.antispam ? await getAllowlist(chatId).catch(() => []) : [];
+
   if (settings.profanityFilter && text) {
     const customWords = await getCustomWords(chatId);
-    const result = detectProfanity(text, customWords);
+    const result = detectProfanity(text, customWords, contentAllowlist);
     if (result.matched) {
       const reason = result.source === "custom" ? "запрещённое слово (добавлено вручную)" : "нецензурная лексика";
       return { category: "profanity", reason, forceWarnOnly: false, source: "profanity" };
@@ -114,7 +121,7 @@ export async function moderateMessage(
   }
 
   if (settings.antispam) {
-    const spamResult = detectSpam(message);
+    const spamResult = detectSpam(message, contentAllowlist);
     if (spamResult.matched) {
       const forceWarnOnly = isFirstMessage && spamResult.severity === "low" && !isKnownRepeatOffender;
       return { category: "spam", reason: spamResult.reason ?? "спам", forceWarnOnly, source: "spam-detector" };

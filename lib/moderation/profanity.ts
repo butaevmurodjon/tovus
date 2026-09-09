@@ -112,22 +112,33 @@ export interface ProfanityResult {
   source?: "dictionary" | "custom";
 }
 
-/** `customWords` is the group's manually-added word list (see /customwords, Mini App settings). */
-export function detectProfanity(rawText: string, customWords: string[] = []): ProfanityResult {
+/** `customWords` is the group's manually-added word list (see /customwords, Mini App settings).
+ * `allowPhrases` is the group's content allowlist phrases (lib/db/allowlist.ts) —
+ * a match whose enclosing word contains one is skipped. */
+export function detectProfanity(
+  rawText: string,
+  customWords: string[] = [],
+  allowPhrases: string[] = []
+): ProfanityResult {
   if (!rawText) return { matched: false };
   const text = rawText.toLowerCase();
+  const allowed = allowPhrases.map((p) => p.trim().toLowerCase()).filter((p) => p.length > 0);
+  const isAllowed = (fragment: string) => allowed.some((a) => fragment.includes(a) || a.includes(fragment));
 
   PROFANITY_REGEX.lastIndex = 0;
   for (const match of text.matchAll(PROFANITY_REGEX)) {
     const word = enclosingWord(text, match.index, match[0].length);
     if (isWhitelistedWord(word)) continue;
+    if (allowed.length > 0 && isAllowed(word)) continue;
     return { matched: true, snippet: match[0], source: "dictionary" };
   }
 
   const customRegex = buildCustomWordsRegex(customWords);
   if (customRegex) {
     const match = text.match(customRegex);
-    if (match) return { matched: true, snippet: match[0], source: "custom" };
+    if (match && !(allowed.length > 0 && isAllowed(match[0]))) {
+      return { matched: true, snippet: match[0], source: "custom" };
+    }
   }
 
   return { matched: false };

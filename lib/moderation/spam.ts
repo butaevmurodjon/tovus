@@ -10,6 +10,7 @@ import {
   findMaskedLinkHost,
   hostnameOf,
 } from "./textSignals";
+import { buildAllowlistMatcher } from "./allowlist";
 
 export interface SpamResult {
   matched: boolean;
@@ -22,7 +23,8 @@ export interface SpamResult {
  * Base (non-LLM) spam heuristics: link volume, blacklisted domains,
  * forwarded-channel-ad pattern, mass mentions.
  */
-export function detectSpam(message: Message): SpamResult {
+export function detectSpam(message: Message, allowlist: string[] = []): SpamResult {
+  const allow = buildAllowlistMatcher(allowlist);
   const dangerousFile = findDangerousFileTag(message);
   if (dangerousFile) {
     const where = dangerousFile.fromQuotedMessage ? " в цитируемом сообщении" : "";
@@ -39,7 +41,9 @@ export function detectSpam(message: Message): SpamResult {
     const quoteLower = quote.text.toLowerCase();
     const quoteSource = quote.isExternal ? " из другого чата/канала" : "";
 
-    const quoteScamPattern = SCAM_PATTERNS.find((phrase) => quoteLower.includes(phrase));
+    const quoteScamPattern = SCAM_PATTERNS.find(
+      (phrase) => quoteLower.includes(phrase) && !allow.allowsPhrase(phrase)
+    );
     if (quoteScamPattern) {
       return { matched: true, reason: `скам-схема в цитате${quoteSource}: ${quoteScamPattern}`, severity: "high" };
     }
@@ -51,6 +55,7 @@ export function detectSpam(message: Message): SpamResult {
     const quoteLinks = extractLinks(quote.text, quote.entities);
     for (const link of quoteLinks) {
       const host = hostnameOf(link);
+      if (allow.allowsLink(link)) continue;
       if (host && DOMAIN_BLACKLIST.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
         return { matched: true, reason: `запрещённый домен в цитате${quoteSource}: ${host}`, severity: "high" };
       }
@@ -63,7 +68,9 @@ export function detectSpam(message: Message): SpamResult {
     // its closing CTA (containsCta) — a quote can be truncated to a couple
     // dozen characters and still needs to trip this. Real sample: quote.text
     // starting "🔥 Бесплатный впн VanyaVPN...".
-    const quotePromo = QUOTE_AD_MARKERS.find((phrase) => quoteLower.includes(phrase));
+    const quotePromo = QUOTE_AD_MARKERS.find(
+      (phrase) => quoteLower.includes(phrase) && !allow.allowsPhrase(phrase)
+    );
     if (quotePromo) {
       return { matched: true, reason: `реклама, замаскированная под цитату${quoteSource}: ${quotePromo}`, severity: "high" };
     }
@@ -89,20 +96,26 @@ export function detectSpam(message: Message): SpamResult {
   // applyViolation) instead of slipping through because it had no URL. Kept as
   // specific multi-word phrases — bare terms like "ищем работников" or "ставка
   // за час" are legitimate job-ad vocabulary and must not trip this.
-  const scamPattern = SCAM_PATTERNS.find((phrase) => text.toLowerCase().includes(phrase));
+  const scamPattern = SCAM_PATTERNS.find(
+    (phrase) => text.toLowerCase().includes(phrase) && !allow.allowsPhrase(phrase)
+  );
   if (scamPattern) {
     return { matched: true, reason: `скам-схема: ${scamPattern}`, severity: "high" };
   }
 
-  const links = extractLinks(text, entities);
+  // Links to an allowlisted host don't count toward any link-based signal
+  // (blacklist, invite, count, link+CTA) — suppress the signal, not the whole
+  // verdict, so an allowlisted domain can't be used to smuggle other spam.
+  const allLinks = extractLinks(text, entities);
+  const links = allow.empty ? allLinks : allLinks.filter((l) => !allow.allowsLink(l));
 
   const maskedHost = findMaskedLinkHost(text, entities);
-  if (maskedHost) {
+  if (maskedHost && !allow.allowsHost(maskedHost)) {
     return { matched: true, reason: `маскированная ссылка (ведёт на ${maskedHost})`, severity: "high" };
   }
 
   const cloakedBotLink = findCloakedBotLink(text, entities);
-  if (cloakedBotLink) {
+  if (cloakedBotLink && !allow.allowsHost(cloakedBotLink)) {
     return { matched: true, reason: `обычное слово замаскировано под ссылку на бота: ${cloakedBotLink}`, severity: "high" };
   }
 

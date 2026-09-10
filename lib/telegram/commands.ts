@@ -11,6 +11,12 @@ import { addCustomWord, addCustomWords, getCustomWords, removeCustomWord } from 
 import { getStats } from "@/lib/db/stats";
 import { getReactionStats } from "@/lib/db/reactionStats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
+import { countReferrals, setPendingRef } from "@/lib/db/referrals";
+import {
+  REFERRAL_GROUPS_FOR_REWARD,
+  REFERRAL_MIN_MEMBERS,
+  REFERRAL_REWARD_MONTHS,
+} from "./referrals";
 import { canUseProFeature, formatPlanLabel, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
 import { PRESETS, isPresetKey } from "@/lib/moderation/presets";
 import { recordAdminLabel } from "@/lib/moderation/corpusCollector";
@@ -26,6 +32,50 @@ function miniAppButtonUrl(startParam: string): string | null {
   const username = process.env.TELEGRAM_BOT_USERNAME;
   if (!username) return null;
   return `https://t.me/${username}?startapp=${startParam}`;
+}
+
+/**
+ * One-tap "add me to a group" deep link. `admin=` pre-ticks the rights Telegram
+ * shows in the add-to-group dialog — only the two the moderation pipeline
+ * actually needs (delete_messages for every action, restrict_members for
+ * mute/ban/captcha), so the prompt stays cheap to accept. Null when
+ * TELEGRAM_BOT_USERNAME isn't provisioned; every caller must then simply omit
+ * the button rather than render a broken one. GROWTH.md §2.2/§4.3.
+ */
+export function addToGroupUrl(): string | null {
+  const username = process.env.TELEGRAM_BOT_USERNAME;
+  if (!username) return null;
+  return `https://t.me/${username}?startgroup=true&admin=delete_messages+restrict_members`;
+}
+
+/** `?start=ref_<userId>` — opens the bot in a PRIVATE chat and delivers the
+ * payload to bot.command("start") below, which is where attribution is stored
+ * (GROWTH.md §2.4). */
+export function referralUrl(userId: number): string | null {
+  const username = process.env.TELEGRAM_BOT_USERNAME;
+  if (!username) return null;
+  return `https://t.me/${username}?start=ref_${userId}`;
+}
+
+type InlineButton = { text: string; url: string } | { text: string; web_app: { url: string } };
+
+/** Telegram rejects an empty `inline_keyboard`, and both of the buttons we
+ * build come from independent env vars — so a keyboard has to be able to end
+ * up with zero rows and degrade to "no markup at all", not to `[[]]`. */
+function keyboardOrUndefined(rows: (InlineButton | null)[][]) {
+  const inline_keyboard = rows.map((row) => row.filter((b): b is InlineButton => b !== null)).filter((r) => r.length > 0);
+  return inline_keyboard.length > 0 ? { inline_keyboard } : undefined;
+}
+
+/** `ref_<digits>` from a `?start=` payload. Anything else (including `src_*`
+ * campaign tags) yields null — the payload is attacker-controlled, so it's
+ * only ever a plain positive Telegram user id or nothing. */
+export function parseRefPayload(payload: string | undefined | null): number | null {
+  if (!payload) return null;
+  const match = /^ref_(\d{1,19})$/.exec(payload.trim());
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 async function requireGroupChat(ctx: Context, lang: Lang): Promise<boolean> {
@@ -63,11 +113,28 @@ export function registerCommands(bot: Bot): void {
   bot.command("start", async (ctx) => {
     const lang = await langFor(ctx);
     if (ctx.chat.type === "private") {
+      const payload = ctx.match?.toString().trim() ?? "";
+
+      // GROWTH.md §2.4 step 2: remember who referred this user until they
+      // actually add the bot somewhere. Self-referrals are dropped here so
+      // nothing downstream has to re-check. Never blocks the reply.
+      const inviterId = parseRefPayload(payload);
+      if (inviterId !== null && ctx.from && inviterId !== ctx.from.id) {
+        await setPendingRef(ctx.from.id, inviterId).catch(() => {});
+      }
+      // `src_<campaign>` tags (landing page, catalogue listing, ad) — logged
+      // only for now; GROWTH.md §4.4 wires these into GroupEvent.source later.
+      if (/^src_[\w-]{1,32}$/.test(payload)) console.log("[start_src]", payload);
+
       const url = process.env.TELEGRAM_MINI_APP_URL;
+      const addUrl = addToGroupUrl();
       await ctx.reply(t(lang, "bot.welcomePrivate"), {
-        reply_markup: url
-          ? { inline_keyboard: [[{ text: t(lang, "bot.openPanelButton"), web_app: { url } }]] }
-          : undefined,
+        reply_markup: keyboardOrUndefined([
+          [
+            addUrl ? { text: t(lang, "bot.addToGroupButton"), url: addUrl } : null,
+            url ? { text: t(lang, "bot.openPanelButton"), web_app: { url } } : null,
+          ],
+        ]),
       });
       return;
     }
@@ -78,6 +145,40 @@ export function registerCommands(bot: Bot): void {
   });
 
   bot.command("help", async (ctx) => ctx.reply(t(await langFor(ctx), "bot.helpText")));
+
+  // GROWTH.md §2.4: the user-facing half of the referral loop — their link plus
+  // how far along they are. Deliberately private-only: a referral link posted
+  // into a group would credit whoever clicked it there to the poster, and the
+  // link is personal anyway.
+  bot.command("invite", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!ctx.from) return;
+    if (ctx.chat.type !== "private") return ctx.reply(t(lang, "bot.refPrivateOnly"));
+
+    const link = referralUrl(ctx.from.id);
+    if (!link) return ctx.reply(t(lang, "bot.refUnavailable"));
+
+    const count = await countReferrals(ctx.from.id).catch(() => 0);
+    const addUrl = addToGroupUrl();
+    await ctx.reply(
+      // `{target}` is the threshold and `{count}` is actual progress —
+      // consistently, across both keys — so the two can't get swapped by
+      // someone editing the strings later.
+      t(lang, "bot.refInviteText", {
+        link,
+        target: REFERRAL_GROUPS_FOR_REWARD,
+        months: REFERRAL_REWARD_MONTHS,
+        minMembers: REFERRAL_MIN_MEMBERS,
+      }) +
+        "\n\n" +
+        t(lang, "bot.refProgress", { count, target: REFERRAL_GROUPS_FOR_REWARD }),
+      {
+        reply_markup: keyboardOrUndefined([
+          [addUrl ? { text: t(lang, "bot.addToGroupButton"), url: addUrl } : null],
+        ]),
+      }
+    );
+  });
 
   bot.command("panel", async (ctx) => {
     const lang = await langFor(ctx);

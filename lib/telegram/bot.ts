@@ -1,8 +1,24 @@
 import { Bot, webhookCallback } from "grammy";
+import type { Api } from "grammy";
 import { after } from "next/server";
 import type { Message, User } from "grammy/types";
-import { getGroupSettings, isRegisteredGroup, isWhitelisted, registerGroup, unregisterGroup } from "@/lib/db/groups";
+import {
+  getGroupSettings,
+  isRegisteredGroup,
+  isWhitelisted,
+  registerGroup,
+  unregisterGroup,
+  updateGroupSettings,
+} from "@/lib/db/groups";
 import { recordGroupEvent } from "@/lib/db/groupEvents";
+import {
+  clearPendingRef,
+  getPendingRef,
+  isCreditableReferral,
+  listReferrals,
+  recordReferral,
+} from "@/lib/db/referrals";
+import { maybeRewardReferrer, REFERRAL_MIN_MEMBERS } from "./referrals";
 import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
 import { incrementActivity, incrementHourlyActivity, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
@@ -53,6 +69,43 @@ function logJoinSignal(chatId: number, message: Message, member: User, reason: s
   }).catch(() => {});
 }
 
+/**
+ * Referral attribution for a group the bot was just added to (GROWTH.md §2.4).
+ * Best-effort throughout — every failure mode ends in "no credit", never in a
+ * thrown error reaching the my_chat_member handler.
+ *
+ * Anti-abuse, in order: no self-referral, the group must be big enough
+ * (REFERRAL_MIN_MEMBERS) and its size must actually be *known* — an unknown
+ * count fails closed via `isCreditableReferral` — and `recordReferral` credits
+ * each chatId to an inviter at most once. The pending ref is consumed either
+ * way, so a rejected group can't be retried against the same link forever.
+ */
+async function creditReferral(api: Api, chatId: number, title: string, adderId: number): Promise<void> {
+  const inviterId = await getPendingRef(adderId).catch(() => null);
+  if (inviterId === null || inviterId === adderId) return;
+
+  const memberCount = await getCachedMemberCount(api, chatId).catch(() => null);
+  const existing = await listReferrals(inviterId).catch(() => []);
+  const creditable = isCreditableReferral({
+    inviterId,
+    inviteeId: adderId,
+    chatId,
+    memberCount,
+    minMembers: REFERRAL_MIN_MEMBERS,
+    existing,
+  });
+
+  if (creditable) {
+    const count = await recordReferral({ inviterId, chatId, chatTitle: title });
+    // Attribution on the group record itself — audit/analytics only; the payout
+    // above reads lib/db/referrals.ts, never this field.
+    await updateGroupSettings(chatId, { referredBy: inviterId }).catch(() => {});
+    if (count !== null) await maybeRewardReferrer(api, inviterId, chatId);
+  }
+
+  await clearPendingRef(adderId);
+}
+
 export function getBot(): Bot {
   if (_bot) return _bot;
 
@@ -72,7 +125,16 @@ export function getBot(): Bot {
     if (newMember.status === "member" || newMember.status === "administrator") {
       const wasRegistered = await isRegisteredGroup(chat.id).catch(() => true);
       await registerGroup(chat.id, chat.title ?? "", detectLang(update.from.language_code));
-      if (!wasRegistered) await recordGroupEvent("added", chat.id, chat.title ?? "");
+      if (!wasRegistered) {
+        await recordGroupEvent("added", chat.id, chat.title ?? "");
+        // GROWTH.md §2.4 step 3: the person in `update.from` is the one who
+        // added the bot — if they arrived via someone's ?start=ref_ link, that
+        // someone gets credit for this group. Entirely in after(): a member-count
+        // lookup, several Redis round trips and possibly a plan grant + DM have
+        // no business sitting on the awaited webhook path, and none of it may
+        // ever be able to fail group registration.
+        after(() => creditReferral(ctx.api, chat.id, chat.title ?? "", update.from.id).catch(() => {}));
+      }
       // Seed the admin reverse index from scratch — we have no history of who
       // was already admin before the bot joined/was promoted, so this is the
       // only way to learn it. Ongoing changes are tracked incrementally below.

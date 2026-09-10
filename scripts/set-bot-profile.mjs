@@ -18,12 +18,22 @@ const api = (method, body) =>
     body: JSON.stringify(body),
   }).then((r) => r.json());
 
+// Display name (BotFather /setname). Kept in sync BY HAND with SITE_NAME in
+// lib/seo.ts — this is a plain .mjs script and can't import the TS module.
+//
+// ⚠️ setMyName is heavily rate-limited by Telegram: the name is effectively a
+// one-shot choice, not something to A/B test (GROWTH.md §0, §6 decision 2).
+// GROWTH.md §1.2 recommends the keyword-first variant
+// "Антиспам TOVUS — мат, реклама, APK"; the owner chose the brand-first form
+// below. Changing this line changes the bot's public name on the next run.
+const name = "TOVUS | Антиспам";
+
 const shortDescription =
   "Бот-модератор чатов: чистит мат и спам, гибкие настройки и панель управления через Mini App.";
 
 const description = `Добавьте меня в группу администратором — буду автоматически удалять нецензурную лексику и рекламный спам (ссылки на посторонние каналы/боты, «пишите в ЛС», флуд).
 
-Есть бесплатный базовый фильтр и опциональный премиум-режим на ИИ (Groq) для спорных случаев. Все настройки — через команды в чате или через панель управления (Mini App): фильтры, действие при нарушении, белый список, свои слова, журнал удалений, статистика.
+Есть бесплатный базовый фильтр и опциональный премиум-режим на ИИ (DeepSeek) для спорных случаев. Все настройки — через команды в чате или через панель управления (Mini App): фильтры, действие при нарушении, белый список, свои слова, журнал удалений, статистика.
 
 /help — список команд.`;
 
@@ -40,9 +50,14 @@ const commandsRu = [
   { command: "filter_profanity", description: "Фильтр мата: on/off" },
   { command: "antispam", description: "Антиспам: on/off" },
   { command: "cascheck", description: "Проверка новых участников по базе CAS: on/off" },
+  { command: "restrictnewmembers", description: "Ограничить новых участников: on/off" },
+  { command: "restrictminutes", description: "Длительность ограничения новичков: 1-1440 мин" },
+  { command: "nightmode", description: "Тихий час: on/off" },
+  { command: "nighthours", description: "Часы тихого часа: <начало> <конец> (0-23, UTC)" },
   { command: "action", description: "Действие: delete/warn/mute/ban" },
   { command: "warnlimit", description: "Эскалация после N предупреждений: 0-20 (0=выкл)" },
   { command: "warnaction", description: "Действие при лимите предупреждений: mute/ban" },
+  { command: "votebanthreshold", description: "Голосов участников для автоснятия мута/бана: 1-50" },
   { command: "whitelist", description: "Белый список: add/remove" },
   { command: "customwords", description: "Свои слова для фильтра" },
   { command: "spam", description: "Ответом: пометить как спам для обучения фильтра" },
@@ -50,11 +65,15 @@ const commandsRu = [
   { command: "welcome", description: "Приветственное сообщение" },
   { command: "logchannel", description: "Канал-журнал удалений" },
   { command: "captcha", description: "Капча для новых участников: on/off (PRO)" },
+  { command: "captchatype", description: "Тип капчи: button/math/rules" },
+  { command: "captchatimeout", description: "Время на прохождение капчи: 30-600 сек (PRO)" },
+  { command: "rulestext", description: "Текст правил для капчи типа rules" },
   { command: "antiraid", description: "Антирейд-защита: on/off (PRO)" },
   { command: "federation", description: "Общий бан-лист с другими группами: on/off (PRO)" },
   { command: "stats", description: "Статистика: today/7d/30d" },
   { command: "plan", description: "Статус тарифа" },
   { command: "upgrade", description: "Оформить PRO-тариф" },
+  { command: "invite", description: "Реферальная ссылка: 3 группы = месяц PRO" },
   { command: "preset", description: "Набор слов под отрасль" },
   { command: "lang", description: "Язык уведомлений группы: ru/uz" },
 ];
@@ -68,9 +87,14 @@ const commandsUz = [
   { command: "filter_profanity", description: "Сўкиниш фильтри: on/off" },
   { command: "antispam", description: "Антиспам: on/off" },
   { command: "cascheck", description: "CAS базаси орқали янги аъзоларни текшириш: on/off" },
+  { command: "restrictnewmembers", description: "Янги аъзоларни чеклаш: on/off" },
+  { command: "restrictminutes", description: "Янгиларни чеклаш давомийлиги: 1-1440 дақ" },
+  { command: "nightmode", description: "Сокин соат: on/off" },
+  { command: "nighthours", description: "Сокин соат вақти: <бошланиш> <тугаш> (0-23, UTC)" },
   { command: "action", description: "Чора: delete/warn/mute/ban" },
   { command: "warnlimit", description: "N огоҳлантиришдан кейин эскалация: 0-20 (0=ўчирилган)" },
   { command: "warnaction", description: "Огоҳлантириш лимитида чора: mute/ban" },
+  { command: "votebanthreshold", description: "Мут/банни автобекор қилиш учун овозлар: 1-50" },
   { command: "whitelist", description: "Оқ рўйхат: add/remove" },
   { command: "customwords", description: "Фильтр учун ўз сўзлари" },
   { command: "spam", description: "Жавобан: фильтрни ўргатиш учун спам деб белгилаш" },
@@ -78,16 +102,26 @@ const commandsUz = [
   { command: "welcome", description: "Хуш келибсиз хабари" },
   { command: "logchannel", description: "Ўчиришлар журнали канали" },
   { command: "captcha", description: "Янги аъзолар учун капча: on/off (PRO)" },
+  { command: "captchatype", description: "Капча тури: button/math/rules" },
+  { command: "captchatimeout", description: "Капчани ўтиш вақти: 30-600 сония (PRO)" },
+  { command: "rulestext", description: "rules капча тури учун қоидалар матни" },
   { command: "antiraid", description: "Антирейд-ҳимоя: on/off (PRO)" },
   { command: "federation", description: "Бошқа гуруҳлар билан умумий бан-рўйхати: on/off (PRO)" },
   { command: "stats", description: "Статистика: today/7d/30d" },
   { command: "plan", description: "Тариф ҳолати" },
   { command: "upgrade", description: "PRO тарифни расмийлаштириш" },
+  { command: "invite", description: "Реферал ҳавола: 3 гуруҳ = 1 ой PRO" },
   { command: "preset", description: "Соҳа учун сўзлар тўплами" },
   { command: "lang", description: "Гуруҳ хабарномалари тили: ru/uz" },
 ];
 
 const results = await Promise.all([
+  // No language_code: the name is identical in both locales, and setMyName is
+  // rate-limited hard enough that per-language calls would only triple the
+  // chance of a throttle. A throttled setMyName makes this whole script exit 1
+  // even when the descriptions and command lists all landed — check the
+  // per-call lines below before assuming nothing was applied.
+  api("setMyName", { name }),
   api("setMyShortDescription", { short_description: shortDescription, language_code: "ru" }),
   api("setMyDescription", { description, language_code: "ru" }),
   // language_code: "ru" only covers clients whose Telegram UI language is
@@ -100,6 +134,7 @@ const results = await Promise.all([
 ]);
 
 const labels = [
+  "setMyName",
   "setMyShortDescription",
   "setMyDescription",
   "setMyCommands (ru)",

@@ -89,6 +89,16 @@ export interface GroupSettings {
   plan: PlanTier;
   /** Unix ms. Null unless a Stars subscription has ever been active for this group. */
   planExpiresAt: number | null;
+  /** GROWTH.md §2.5: allows ONE inline "🛡 Защитить свой чат" button under a
+   * warn/mute/ban notice — the bot's only in-chat growth surface. On by
+   * default, but only ever rendered for groups without an active Pro plan
+   * (see notifyChat): paying groups buy silence, among other things. */
+  attributionEnabled: boolean;
+  /** Telegram user id of whoever's `?start=ref_<id>` link led to this group
+   * being added (GROWTH.md §2.4). Attribution/audit only — the reward payout
+   * reads lib/db/referrals.ts, never this field, so a wrong value here can't
+   * grant anyone anything. */
+  referredBy: number | null;
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -123,6 +133,8 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   nightModeEndHour: 2,
   plan: "free",
   planExpiresAt: null,
+  attributionEnabled: true,
+  referredBy: null,
 };
 
 export interface JournalEntry {

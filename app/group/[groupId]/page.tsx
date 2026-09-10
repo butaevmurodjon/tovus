@@ -522,6 +522,23 @@ export default function GroupSettingsPage() {
           <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
             {t("miniapp.deleteNoticeHint")}
           </p>
+          {/* The attribution button is suppressed outright for active-Pro
+              groups (see notifyChat), so showing a toggle that changes nothing
+              there would just be misleading — hidden rather than disabled. */}
+          {!isProActive(settings) && (
+            <>
+              <Divider />
+              <Row label={t("miniapp.attributionTitle")}>
+                <Toggle
+                  checked={settings.attributionEnabled}
+                  onChange={(v) => setField("attributionEnabled", v)}
+                />
+              </Row>
+              <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
+                {t("miniapp.attributionHint")}
+              </p>
+            </>
+          )}
         </CardSection>
       </Card>
 

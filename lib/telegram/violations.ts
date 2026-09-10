@@ -1,7 +1,7 @@
 import type { Api } from "grammy";
 import { GrammyError } from "grammy";
 import { after } from "next/server";
-import type { Message, User } from "grammy/types";
+import type { InlineKeyboardMarkup, Message, User } from "grammy/types";
 import type { GroupSettings, ViolationAction } from "@/lib/db/types";
 import type { Lang } from "@/lib/i18n";
 import type { ModerationVerdict } from "@/lib/moderation";
@@ -15,6 +15,8 @@ import { propagateBan } from "./federation";
 import { clearWarns, recordWarn } from "@/lib/moderation/warns";
 import { collectSpamSignals, countedSignals, scoreSignals } from "@/lib/moderation/scoring";
 import { getAllowlist } from "@/lib/db/allowlist";
+import { isProActive } from "@/lib/billing/plan";
+import { addToGroupUrl } from "./commands";
 import { startVoteBan } from "./voteban";
 
 /** Best-effort limit for the visible (wall-clock) reaction sample — matches
@@ -219,6 +221,15 @@ async function notifyChat(
     return;
   }
 
+  // GROWTH.md §2.5: exactly one inline link-button under a warn/mute/ban notice,
+  // never under the delete notice (that branch is deliberately as quiet as
+  // possible). Suppressed for paying groups — `isProActive`, not
+  // `plan !== "pro"`: nothing ever writes `plan` back to "free" when a
+  // subscription lapses, so the cruder check would silence the button forever
+  // for any group that was Pro once, including via the referral month itself.
+  const attributionLink = settings.attributionEnabled && !isProActive(settings) ? addToGroupUrl() : null;
+  const attributionRow = attributionLink ? [{ text: t(lang, "bot.poweredBy"), url: attributionLink }] : null;
+
   if (action === "warn") {
     // One generic, reason-templated message for every warn — forceWarnOnly now
     // covers several unrelated leniency cases (new member link, restricted-window
@@ -228,7 +239,10 @@ async function notifyChat(
     if (!verdict.forceWarnOnly && settings.warnEscalationEnabled && escalation.warnCount !== null) {
       text += " " + t(lang, "bot.warnCount", { count: escalation.warnCount, limit: settings.warnLimit });
     }
-    await api.sendMessage(chatId, text + reaction, { parse_mode: "HTML" });
+    await api.sendMessage(chatId, text + reaction, {
+      parse_mode: "HTML",
+      reply_markup: attributionRow ? { inline_keyboard: [attributionRow] } : undefined,
+    });
     return;
   }
 
@@ -254,7 +268,13 @@ async function notifyChat(
     const sent = await api.sendMessage(
       chatId,
       t(lang, "bot.mutedUser", { user: mention, reason: verdict.reason }) + escalationSuffix + reaction,
-      { parse_mode: "HTML", reply_markup: voteBanKeyboard(lang, chatId, user.id, settings.voteBanThreshold) }
+      {
+        parse_mode: "HTML",
+        reply_markup: withAttribution(
+          voteBanKeyboard(lang, chatId, user.id, settings.voteBanThreshold),
+          attributionRow
+        ),
+      }
     );
     await startVoteBan(chatId, user.id, sent.message_id).catch(() => {});
     return;
@@ -270,14 +290,34 @@ async function notifyChat(
       t(lang, "bot.bannedUser", { user: mention, reason: verdict.reason }) + escalationSuffix + reaction,
       {
         parse_mode: "HTML",
-        reply_markup: voteEligible ? voteBanKeyboard(lang, chatId, user.id, settings.voteBanThreshold) : undefined,
+        reply_markup: withAttribution(
+          voteEligible ? voteBanKeyboard(lang, chatId, user.id, settings.voteBanThreshold) : undefined,
+          attributionRow
+        ),
       }
     );
     if (voteEligible) await startVoteBan(chatId, user.id, sent.message_id).catch(() => {});
   }
 }
 
-function voteBanKeyboard(lang: GroupSettings["lang"], chatId: number, userId: number, threshold: number) {
+/** Appends the attribution button as an EXTRA row — it never replaces the
+ * vote-ban button. Returns undefined (not an empty keyboard, which Telegram
+ * rejects) when there's nothing to show at all: a federated ban with
+ * attribution off has neither row. */
+function withAttribution(
+  base: InlineKeyboardMarkup | undefined,
+  attributionRow: { text: string; url: string }[] | null
+): InlineKeyboardMarkup | undefined {
+  const rows = [...(base?.inline_keyboard ?? []), ...(attributionRow ? [attributionRow] : [])];
+  return rows.length > 0 ? { inline_keyboard: rows } : undefined;
+}
+
+function voteBanKeyboard(
+  lang: GroupSettings["lang"],
+  chatId: number,
+  userId: number,
+  threshold: number
+): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [

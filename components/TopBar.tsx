@@ -25,7 +25,10 @@ export function TopBar({
           <Link
             href={backHref}
             aria-label={t("common.back")}
-            className="shrink-0 flex items-center justify-center h-7 w-7 rounded-full"
+            // -ml-2 keeps the glyph optically where the old 28px box put it
+            // while the touch target grows to 36px — 28px was well under any
+            // usable minimum, and this is the control people hit most.
+            className="shrink-0 -ml-2 flex items-center justify-center h-9 w-9 rounded-full text-[17px] leading-none active:opacity-60"
             style={{ color: "var(--ink-secondary)" }}
           >
             ←
@@ -50,7 +53,7 @@ function LangSwitch({ lang, onChange }: { lang: Lang; onChange: (lang: Lang) => 
             key={code}
             type="button"
             onClick={() => onChange(code)}
-            className="rounded-full px-2.5 py-1 text-[12px] font-semibold uppercase transition-colors"
+            className="rounded-full px-3 py-1.5 min-h-[30px] text-[12px] font-semibold uppercase transition-colors"
             style={{
               background: active ? "var(--accent)" : "transparent",
               color: active ? "#fff" : "var(--ink-muted)",

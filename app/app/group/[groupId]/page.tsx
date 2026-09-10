@@ -344,7 +344,7 @@ export default function GroupSettingsPage() {
     <div className="px-4 py-4 flex flex-col gap-3">
       {toast && (
         <div
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-20 rounded-full px-3.5 py-1.5 text-[12px] font-medium"
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] rounded-full px-3.5 py-1.5 text-center text-[12px] font-medium"
           style={{ background: "var(--ink)", color: "#fff" }}
         >
           {toast}
@@ -478,7 +478,12 @@ export default function GroupSettingsPage() {
                     max={23}
                     value={nightStartInput}
                     onChange={(e) => setNightStartInput(e.target.value)}
-                    className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+                    // w-full, not flex-1: the wrapper is a plain block div (it
+                    // holds the label above), so `flex-1` was inert here and
+                    // the input kept its intrinsic ~170px width. Two of those
+                    // plus the Save button overflowed the card horizontally on
+                    // any phone narrower than ~430px.
+                    className="w-full min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
                     style={{ borderColor: "var(--border-strong)" }}
                   />
                 </div>
@@ -492,11 +497,16 @@ export default function GroupSettingsPage() {
                     max={23}
                     value={nightEndInput}
                     onChange={(e) => setNightEndInput(e.target.value)}
-                    className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+                    className="w-full min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
                     style={{ borderColor: "var(--border-strong)" }}
                   />
                 </div>
-                <Button variant="primary" onClick={saveNightHours} disabled={savingNightHours}>
+                <Button
+                  variant="primary"
+                  onClick={saveNightHours}
+                  disabled={savingNightHours}
+                  className="shrink-0"
+                >
                   {t("common.save")}
                 </Button>
               </div>
@@ -649,7 +659,7 @@ export default function GroupSettingsPage() {
               className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
               style={{ borderColor: "var(--border-strong)" }}
             />
-            <Button variant="primary" onClick={saveLogChannel} disabled={savingLogChannel}>
+            <Button variant="primary" onClick={saveLogChannel} disabled={savingLogChannel} className="shrink-0">
               {t("common.save")}
             </Button>
           </div>
@@ -666,7 +676,7 @@ export default function GroupSettingsPage() {
               className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
               style={{ borderColor: "var(--border-strong)" }}
             />
-            <Button variant="primary" onClick={saveWelcome} disabled={savingWelcome}>
+            <Button variant="primary" onClick={saveWelcome} disabled={savingWelcome} className="shrink-0">
               {t("common.save")}
             </Button>
           </div>
@@ -723,7 +733,7 @@ export default function GroupSettingsPage() {
                         className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
                         style={{ borderColor: "var(--border-strong)" }}
                       />
-                      <Button variant="primary" onClick={saveRulesText} disabled={savingRulesText}>
+                      <Button variant="primary" onClick={saveRulesText} disabled={savingRulesText} className="shrink-0">
                         {t("common.save")}
                       </Button>
                     </div>
@@ -835,8 +845,11 @@ function ProFeatureHint({
 
 function Row({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between py-1.5">
-      <span className="text-[14px]" style={{ color: "var(--ink)" }}>
+    // gap-3 + min-w-0: the label is free to wrap (several are long enough to
+    // on a 320px screen), and justify-between alone left a wrapped last line
+    // butting straight against the toggle with no gutter.
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <span className="text-[14px] min-w-0" style={{ color: "var(--ink)" }}>
         {label}
       </span>
       {children}

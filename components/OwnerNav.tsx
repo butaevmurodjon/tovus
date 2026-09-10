@@ -33,7 +33,7 @@ export function OwnerNav() {
             key={item.href}
             href={item.href}
             aria-current={active ? "page" : undefined}
-            className="flex-1 flex flex-col items-center gap-0.5 py-2.5 px-1 select-none"
+            className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2.5 px-1 min-h-[52px] select-none"
             style={{ color: active ? "var(--accent)" : "var(--ink-muted)" }}
           >
             <span className="text-[16px] leading-none">{item.icon}</span>

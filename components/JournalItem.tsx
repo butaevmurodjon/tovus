@@ -76,7 +76,11 @@ export function JournalItem({
         </span>
       </div>
 
-      <p className="text-[13px] font-medium mb-0.5" style={{ color: "var(--ink)" }}>
+      {/* break-words on both of these for the same reason the message text
+          below already had it: a display name can be a single unbroken run of
+          characters (no spaces at all is common for spam accounts) and the
+          reason string can carry a bare URL — either one overflowed the card. */}
+      <p className="text-[13px] font-medium mb-0.5 break-words" style={{ color: "var(--ink)" }}>
         {entry.displayName}
       </p>
       {entry.text && (
@@ -84,7 +88,7 @@ export function JournalItem({
           {entry.text}
         </p>
       )}
-      <p className="text-[11px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+      <p className="text-[11px] mb-1.5 break-words" style={{ color: "var(--ink-muted)" }}>
         {labels.reasonLabel}: {entry.reason}
       </p>
 

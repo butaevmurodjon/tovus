@@ -32,7 +32,15 @@ export function SegmentedControl<T extends string>({
             role="radio"
             aria-checked={active}
             onClick={() => onChange(opt.value)}
-            className="rounded-[7px] px-2.5 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors"
+            // NOT whitespace-nowrap. The columns are `minmax(0, 1fr)`, so a
+            // label wider than its share of the row used to paint straight
+            // over its neighbours instead of wrapping — "Сбалансированный"
+            // (the middle strictness preset, ~137px at 13px) against a ~95px
+            // column on a 360px-wide WebView, and again for the longer Uzbek
+            // labels. Wrapping inside a fixed column is consistent; the grid
+            // stretches every button to the tallest row so a two-line label
+            // doesn't leave the others floating.
+            className="rounded-[7px] px-2.5 py-1.5 text-[13px] font-medium leading-tight text-center break-words transition-colors"
             style={{
               background: active ? "var(--surface)" : "transparent",
               color: active ? "var(--ink)" : "var(--ink-muted)",

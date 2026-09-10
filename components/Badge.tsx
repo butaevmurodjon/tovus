@@ -13,7 +13,11 @@ export function Badge({ children, variant = "neutral" }: { children: React.React
   const style = VARIANT_STYLES[variant];
   return (
     <span
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-normal"
+      // max-w-full so a badge whose content is a single long token — an
+      // allowlisted domain or a custom word in the journal's chip lists — is
+      // capped by its container and wraps, instead of pushing the row wider
+      // than the viewport.
+      className="inline-flex items-center max-w-full rounded-full px-2 py-0.5 text-[11px] font-medium leading-normal"
       style={{ background: style.bg, color: style.fg }}
     >
       {children}

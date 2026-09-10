@@ -4,9 +4,15 @@ import { Providers } from "./providers";
 import { SITE_NAME, SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
-const TITLE_DEFAULT = "Бот-модератор Telegram: антиспам, фильтр мата и удаление .apk";
+/**
+ * `удаление .apk` was shortened to `.apk` to make room for `антискам` without
+ * lengthening the title: 62 characters against the previous 61, still inside
+ * the ~60–65 mark where Google and Yandex start truncating Cyrillic titles.
+ * Keep any future edit a SWAP, not an append.
+ */
+const TITLE_DEFAULT = "Бот-модератор Telegram: антиспам, антискам, фильтр мата и .apk";
 const DESCRIPTION =
-  "Антиспам-бот для Telegram: удаляет рекламу, мат и вирусные .apk. " +
+  "Антиспам-бот для Telegram: удаляет рекламу, мат, скам и вирусные .apk. " +
   "Модерация телеграм-группы на русском и узбекском, настройки — в панели прямо внутри Telegram.";
 
 export const metadata: Metadata = {
@@ -30,6 +36,9 @@ export const metadata: Metadata = {
     "антиспам бот для телеграм группы",
     "фильтр мата телеграм",
     "бот модератор чата узбекский",
+    "антискам бот телеграм",
+    "бот против скама",
+    "защита от мошенников телеграм",
   ],
   // INHERITED by every route that does not declare its own. Any new public
   // page (/uz, /terms, /blog/*) MUST set its own `alternates.canonical`, or it

@@ -39,7 +39,7 @@ export default function GroupJournalPage() {
     <div className="px-4 py-4 flex flex-col gap-3">
       {toast && (
         <div
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-20 rounded-full px-3.5 py-1.5 text-[12px] font-medium"
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] rounded-full px-3.5 py-1.5 text-center text-[12px] font-medium"
           style={{ background: "var(--ink)", color: "#fff" }}
         >
           {toast}
@@ -317,9 +317,13 @@ function WhitelistTab({ t, flash }: { t: T; flash: (message: string) => void }) 
           )}
           {(whitelist ?? []).map((id) => (
             <Badge key={id} variant="neutral">
-              <span className="flex items-center gap-1.5">
-                id{id}
-                <button onClick={() => remove(id)} aria-label={t("common.remove")} className="font-bold">
+              <span className="flex items-center gap-1.5 max-w-full">
+                <span className="min-w-0 break-all">id{id}</span>
+                <button
+                  onClick={() => remove(id)}
+                  aria-label={t("common.remove")}
+                  className="font-bold shrink-0 -my-1.5 -mr-1.5 py-1.5 pl-1.5 pr-2 leading-none active:opacity-60"
+                >
                   ×
                 </button>
               </span>
@@ -457,9 +461,13 @@ function AllowlistCard({ t, flash }: { t: T; flash: (message: string) => void })
           )}
           {(entries ?? []).map((entry) => (
             <Badge key={entry} variant="neutral">
-              <span className="flex items-center gap-1.5">
-                {entry}
-                <button onClick={() => remove(entry)} aria-label={t("common.remove")} className="font-bold">
+              <span className="flex items-center gap-1.5 max-w-full">
+                <span className="min-w-0 break-all">{entry}</span>
+                <button
+                  onClick={() => remove(entry)}
+                  aria-label={t("common.remove")}
+                  className="font-bold shrink-0 -my-1.5 -mr-1.5 py-1.5 pl-1.5 pr-2 leading-none active:opacity-60"
+                >
                   ×
                 </button>
               </span>
@@ -635,9 +643,13 @@ function WordFilterTab({ t, flash }: { t: T; flash: (message: string) => void })
             )}
             {(customWords ?? []).map((word) => (
               <Badge key={word} variant="neutral">
-                <span className="flex items-center gap-1.5">
-                  {word}
-                  <button onClick={() => remove(word)} aria-label={t("common.remove")} className="font-bold">
+                <span className="flex items-center gap-1.5 max-w-full">
+                  <span className="min-w-0 break-all">{word}</span>
+                  <button
+                    onClick={() => remove(word)}
+                    aria-label={t("common.remove")}
+                    className="font-bold shrink-0 -my-1.5 -mr-1.5 py-1.5 pl-1.5 pr-2 leading-none active:opacity-60"
+                  >
                     ×
                   </button>
                 </span>

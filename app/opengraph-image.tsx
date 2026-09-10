@@ -77,7 +77,11 @@ export default function OpengraphImage() {
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          {["Мат", "Реклама и спам", "Вирусные .apk", "RU / UZ"].map((chip) => (
+          {/* Four chips is the maximum this row fits at fontSize 26 inside the
+              80px side padding — "Реклама и спам" was swapped for the shorter
+              "Спам и скам" rather than adding a fifth chip, which would
+              overflow. Verified by rendering at 1200×630. */}
+          {["Мат", "Спам и скам", "Вирусные .apk", "RU / UZ"].map((chip) => (
             <div
               key={chip}
               style={{

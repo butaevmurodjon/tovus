@@ -67,3 +67,218 @@ textarea {
 a {
   color: inherit;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * LANDING PAGE (`app/page.tsx`) — ADDITIVE ONLY.
+ *
+ * Everything ABOVE this line is shared with the Mini App (`app/app/**`,
+ * `components/**`). Not one existing token was retuned or removed here:
+ * the landing redesign lives entirely in the `--lp-*` custom properties
+ * and `.lp-*` classes below, so restyling `/` cannot silently restyle the
+ * panel.
+ *
+ * Deliberately NOT a Tailwind v4 `@theme` block: `@theme` regenerates
+ * utility classes globally and would leak new `text-*`/`rounded-*` values
+ * into every screen. Plain custom properties plus a handful of prefixed
+ * classes keep the blast radius inside the landing.
+ *
+ * Note on the cascade: `@import "tailwindcss"` puts Tailwind's utilities in
+ * a `layer(utilities)`, and unlayered rules beat layered ones — so these
+ * `.lp-*` classes win over any Tailwind class on the same element. The page
+ * uses Tailwind only for layout (flex/grid/spacing) and `.lp-*` only for
+ * type, so the two never fight over the same property.
+ * ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  /*
+   * One fluid type scale. Every clamp() interpolates between a 320px phone
+   * (the lower bound) and a ~1160px desktop (where the upper bound is
+   * reached); above that it is flat, so a 4K monitor does not get 200px
+   * headlines. The lower bounds are all at or above the sizes the previous
+   * design shipped, so nothing got smaller on mobile.
+   *
+   *                            320px →  1160px
+   */
+  --lp-display: clamp(2.25rem, 1.2rem + 5.24vw, 5rem); /*  36 → 80 */
+  --lp-title: clamp(1.75rem, 1.27rem + 2.38vw, 3rem); /*   28 → 48 */
+  --lp-numeral: clamp(1.75rem, 1.15rem + 3vw, 3.25rem); /* 28 → 52 */
+  --lp-lead: clamp(1.0625rem, 0.85rem + 1.07vw, 1.625rem); /* 17 → 26 */
+  --lp-subhead: clamp(1.0625rem, 0.94rem + 0.6vw, 1.375rem); /* 17 → 22 */
+  --lp-body: clamp(0.9375rem, 0.87rem + 0.36vw, 1.125rem); /*  15 → 18 */
+  --lp-small: clamp(0.8125rem, 0.765rem + 0.24vw, 0.9375rem); /* 13 → 15 */
+  --lp-micro: clamp(0.75rem, 0.71rem + 0.19vw, 0.875rem); /*   12 → 14 */
+
+  /* Vertical rhythm: sections breathe roughly in step with the type. */
+  --lp-section: clamp(3.25rem, 1.6rem + 8.2vw, 7rem);
+  --lp-shell: 1120px;
+}
+
+.lp-shell {
+  width: 100%;
+  max-width: var(--lp-shell);
+  margin-inline: auto;
+  padding-inline: clamp(1.25rem, 0.6rem + 3.2vw, 3.5rem);
+}
+
+/* ── Type ─────────────────────────────────────────────────────────────── */
+.lp-display {
+  font-size: var(--lp-display);
+  line-height: 1.03;
+  /* Optical correction: the bigger the size, the tighter the tracking has
+   * to be or the headline reads as loose at 80px. */
+  letter-spacing: -0.035em;
+  font-weight: 700;
+  color: var(--ink);
+  text-wrap: balance;
+  margin: 0;
+}
+
+.lp-title {
+  font-size: var(--lp-title);
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  font-weight: 700;
+  color: var(--ink);
+  text-wrap: balance;
+  margin: 0;
+}
+
+.lp-lead {
+  font-size: var(--lp-lead);
+  line-height: 1.45;
+  letter-spacing: -0.011em;
+  color: var(--ink-secondary);
+  margin: 0;
+}
+
+.lp-subhead {
+  font-size: var(--lp-subhead);
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+  font-weight: 600;
+  color: var(--ink);
+  text-wrap: balance;
+  margin: 0;
+}
+
+.lp-body {
+  font-size: var(--lp-body);
+  line-height: 1.6;
+  color: var(--ink-secondary);
+  margin: 0;
+}
+
+.lp-small {
+  font-size: var(--lp-small);
+  line-height: 1.55;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+.lp-eyebrow {
+  font-size: var(--lp-micro);
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+.lp-numeral {
+  display: block;
+  font-size: var(--lp-numeral);
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-weight: 700;
+  /* Tabular so "1 2 3" line up across the three columns. */
+  font-variant-numeric: tabular-nums;
+  /* Quiet on purpose — the numeral is a position marker, not a headline, and
+   * must not out-shout the step title beneath it. */
+  color: var(--ink-muted);
+}
+
+/* Comfortable measure. `ch` on the element that actually holds prose, so a
+ * 26px lead never runs to a 1120px line. */
+.lp-measure {
+  max-width: 58ch;
+}
+.lp-measure-tight {
+  max-width: 46ch;
+}
+.lp-measure-wide {
+  max-width: 68ch;
+}
+
+/* ── Rules ────────────────────────────────────────────────────────────── */
+/* The ONLY decoration in the design: hairlines. No cards, no shadows,
+ * no gradients, no fills except the single primary button. */
+.lp-rule {
+  border-top: 1px solid var(--border);
+}
+
+/* ── Actions ──────────────────────────────────────────────────────────── */
+.lp-cta,
+.lp-cta-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  border-radius: 10px;
+  padding: 0.85em 1.5em;
+  font-size: var(--lp-body);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* Ink, not accent: with one filled control on the page the palette stays
+ * ink-on-off-white, and the blue is reserved for inline links. */
+.lp-cta {
+  background: var(--ink);
+  color: var(--page);
+  border: 1px solid var(--ink);
+}
+
+.lp-cta-ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--border-strong);
+}
+
+.lp-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+@media (hover: hover) {
+  .lp-cta:hover {
+    background: #2c2c2c;
+    border-color: #2c2c2c;
+  }
+  .lp-cta-ghost:hover {
+    border-color: var(--ink-muted);
+  }
+  .lp-link:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+}
+
+.lp-cta:focus-visible,
+.lp-cta-ghost:focus-visible,
+.lp-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Long unbroken tokens in the copy ("Telegram-групп", ".apk") must never
+ * push the page sideways on a 320px screen. */
+.lp-page {
+  overflow-x: hidden;
+}
+.lp-page :is(h1, h2, h3, p, li) {
+  overflow-wrap: break-word;
+}

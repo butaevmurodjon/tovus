@@ -11,7 +11,7 @@
 ## Структура
 
 - `lib/moderation/*` — фильтр мата (regex с учётом обхода через замену
-  букв/цифр), антиспам-эвристики, флуд-детект, интеграция с Groq (премиум)
+  букв/цифр), антиспам-эвристики, флуд-детект, интеграция с DeepSeek (премиум)
 - `lib/db/*` — Upstash Redis: настройки групп, whitelist, статистика, журнал
 - `lib/telegram/*` — сам бот (grammY), команды, проверка initData Mini App,
   проверка админ-прав через `getChatMember`
@@ -27,7 +27,8 @@
    - `TELEGRAM_BOT_USERNAME` — username бота без `@`
    - `TELEGRAM_WEBHOOK_SECRET` — любая случайная строка
    - `TELEGRAM_MINI_APP_URL` — публичный URL деплоя (после первого `vercel deploy`)
-   - `GROQ_API_KEY` — с [console.groq.com](https://console.groq.com) (бесплатный tier)
+   - `DEEPSEEK_API_KEY` — с [platform.deepseek.com](https://platform.deepseek.com);
+     используется только когда в группе включён премиум-режим
 2. Поднимите Upstash Redis через Vercel Marketplace: `vercel integration add upstash`
    (создаст `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` автоматически).
 3. `vercel env pull .env.local` чтобы синхронизировать переменные локально.
@@ -50,12 +51,66 @@
 
 ## Команды бота
 
-`/start`, `/help`, `/panel`, `/settings`, `/premium on|off`,
-`/filter_profanity on|off`, `/antispam on|off`, `/action delete|warn|mute|ban`,
-`/whitelist add|remove` (ответом на сообщение или `@username`/id),
-`/customwords add|remove|list <слово>` — свои слова/фразы в фильтр мата,
-поверх встроенного словаря (та же логика обхода через пробелы/символы),
-`/logchannel <id|off>`, `/stats [today|7d|30d]`, `/lang ru|uz`.
+Источник истины — `lib/telegram/commands.ts`; список для автодополнения
+Telegram (`setMyCommands`) живёт в `scripts/set-bot-profile.mjs`. Кроме
+`/start`, `/help`, `/panel`, `/plan` и `/stats` все команды требуют прав
+администратора и работают только в группе. `(PRO)` — доступно на платном
+тарифе (`/upgrade`).
+
+**Базовое**
+
+- `/start` — приветствие, в личке — кнопка открытия панели
+- `/help` — список команд
+- `/panel` — открыть панель управления (Mini App)
+- `/settings` — текущие настройки группы + предупреждение о нехватке прав
+- `/lang ru|uz` — язык уведомлений бота в группе
+
+**Фильтры**
+
+- `/filter_profanity on|off` — фильтр мата
+- `/antispam on|off` — антиспам-эвристики
+- `/premium on|off` — ИИ-разбор спорных случаев (DeepSeek)
+- `/customwords add|remove|list <слово>` — свои слова/фразы поверх встроенного
+  словаря (та же логика обхода через пробелы/символы)
+- `/preset <набор>` — добавить готовый отраслевой набор слов
+
+**Реакция на нарушение**
+
+- `/action delete|warn|mute|ban` — что делать с нарушителем
+- `/warnlimit <0-20>` — эскалация после N предупреждений (0 — выключить)
+- `/warnaction mute|ban` — что делать при достижении лимита предупреждений
+- `/votebanthreshold <1-50>` — сколько голосов нужно для голосового бана
+- `/whitelist add|remove` — белый список (ответом на сообщение либо
+  `@username`/id)
+
+**Новые участники**
+
+- `/cascheck on|off` — проверка новичков по базе CAS
+- `/restrictnewmembers on|off` и `/restrictminutes <1-1440>` — ограничение
+  новичков на первые N минут
+- `/captcha on|off` (PRO, кроме типа `rules`) — проверка новичков
+- `/captchatype button|math|rules` — тип проверки (`button`/`math` — PRO)
+- `/captchatimeout <30-600>` (PRO) — время на прохождение
+- `/rulestext <текст|off>` — текст правил для типа `rules`
+- `/welcome <текст|off>` — приветственное сообщение
+
+**Защита и режимы**
+
+- `/antiraid on|off` (PRO) — антирейд-защита
+- `/federation on|off` (PRO) — общий бан-лист с другими группами
+- `/nightmode on|off` и `/nighthours <start> <end>` — ночной режим (часы 0-23)
+
+**Журнал, статистика, тариф**
+
+- `/logchannel <id|off>` — канал-журнал удалений (бот должен быть его админом)
+- `/stats [today|7d|30d]` — статистика группы
+- `/plan` — текущий тариф
+- `/upgrade` — счёт на PRO (Telegram Stars)
+
+**Обучение фильтра** (работает только при `CORPUS_ENABLED`, см. `PRIVACY.md`)
+
+- `/spam` — ответом на сообщение: удалить и пометить как спам
+- `/ham` — ответом на сообщение: пометить как «не спам»
 
 Свои слова также редактируются в Mini App (Настройки группы → «Свои слова
 для фильтра»).

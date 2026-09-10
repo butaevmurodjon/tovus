@@ -21,7 +21,7 @@ function GroupShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <TopBar title={settings.title || `Chat ${settings.chatId}`} backHref="/" />
+      <TopBar title={settings.title || `Chat ${settings.chatId}`} backHref="/app" />
       <main className="flex-1 pb-20">{children}</main>
       <BottomNav chatId={chatId} />
     </>

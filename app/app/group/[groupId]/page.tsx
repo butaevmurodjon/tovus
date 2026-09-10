@@ -782,7 +782,7 @@ export default function GroupSettingsPage() {
             />
             {settings.federationEnabled && (
               <Link
-                href={`/group/${chatId}/broadcast`}
+                href={`/app/group/${chatId}/broadcast`}
                 className="mt-3 block text-center rounded-[var(--radius-sm)] px-4 py-2.5 text-[14px] font-medium"
                 style={{ background: "#f2f1ee", color: "var(--ink)" }}
               >

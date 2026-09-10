@@ -11,7 +11,7 @@ export function GroupCard({
   labels: { premium: string; basic: string; permissionIssue: string; pro: string };
 }) {
   return (
-    <Link href={`/group/${group.chatId}`} className="block">
+    <Link href={`/app/group/${group.chatId}`} className="block">
       <Card className="p-4 flex items-center justify-between gap-3 active:opacity-70 transition-opacity">
         <div className="min-w-0">
           <p className="text-[14px] font-medium truncate" style={{ color: "var(--ink)" }}>

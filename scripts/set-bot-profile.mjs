@@ -124,6 +124,12 @@ const results = await Promise.all([
   api("setMyName", { name }),
   api("setMyShortDescription", { short_description: shortDescription, language_code: "ru" }),
   api("setMyDescription", { description, language_code: "ru" }),
+  // Same default-fallback reasoning as the commands below: a bot with only a
+  // `ru` description shows a BLANK profile to every non-Russian client (Uzbek,
+  // English, ...). Set the unmarked default too — RU text is a far better
+  // fallback than empty; a dedicated UZ description can be added later.
+  api("setMyShortDescription", { short_description: shortDescription }),
+  api("setMyDescription", { description }),
   // language_code: "ru" only covers clients whose Telegram UI language is
   // Russian — everyone else (Uzbek, English, ...) falls back to whichever
   // list has no language_code at all. Without that default, a non-ru client
@@ -135,8 +141,10 @@ const results = await Promise.all([
 
 const labels = [
   "setMyName",
-  "setMyShortDescription",
-  "setMyDescription",
+  "setMyShortDescription (ru)",
+  "setMyDescription (ru)",
+  "setMyShortDescription (default)",
+  "setMyDescription (default)",
   "setMyCommands (ru)",
   "setMyCommands (uz)",
   "setMyCommands (default)",

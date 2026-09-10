@@ -9,10 +9,10 @@ export function BottomNav({ chatId }: { chatId: number }) {
   const { t, isOwner } = useApp();
 
   const items = [
-    { href: `/group/${chatId}`, label: t("miniapp.settingsTab"), icon: "⚙" },
-    { href: `/group/${chatId}/stats`, label: t("miniapp.statsTab"), icon: "▤" },
-    { href: `/group/${chatId}/journal`, label: t("miniapp.journalTab"), icon: "☰" },
-    ...(isOwner ? [{ href: `/group/${chatId}/owner`, label: "Управление", icon: "🛡" }] : []),
+    { href: `/app/group/${chatId}`, label: t("miniapp.settingsTab"), icon: "⚙" },
+    { href: `/app/group/${chatId}/stats`, label: t("miniapp.statsTab"), icon: "▤" },
+    { href: `/app/group/${chatId}/journal`, label: t("miniapp.journalTab"), icon: "☰" },
+    ...(isOwner ? [{ href: `/app/group/${chatId}/owner`, label: "Управление", icon: "🛡" }] : []),
   ];
 
   return (

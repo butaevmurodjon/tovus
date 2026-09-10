@@ -3,13 +3,17 @@ import { SITE_URL } from "@/lib/seo";
 
 /**
  * robots.txt matching is prefix-based, not segment-based, so the disallow
- * entries intentionally carry NO trailing slash: `/owner` closes both
- * `/owner` itself and `/owner/bans`, while `/owner/` would leave the bare
- * `/owner` page crawlable.
+ * entries intentionally carry NO trailing slash: `/app` closes both `/app`
+ * itself and `/app/owner`, while `/app/` would leave the bare `/app` page
+ * crawlable.
  *
- * `/app` does not exist yet — it is the future Mini App mount point
- * (GROWTH.md §3.2); disallowing it now costs nothing and avoids a forgotten
- * follow-up when the Mini App moves off `/`.
+ * `/app` is the whole Mini App — dashboard, group settings and the owner
+ * panel all live under it since the move off `/` (GROWTH.md §3.2). One prefix
+ * therefore covers everything that used to need three. The old `/owner` and
+ * `/group` prefixes are deliberately NOT listed any more: `next.config.ts`
+ * redirects them into `/app`, and a crawler that is told a URL is disallowed
+ * never follows it far enough to learn it was only a redirect — leaving them
+ * in would just be dead weight in the file.
  */
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -17,7 +21,7 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: "/",
-        disallow: ["/api", "/owner", "/group", "/app"],
+        disallow: ["/api", "/app"],
       },
     ],
     sitemap: `${SITE_URL}/sitemap.xml`,

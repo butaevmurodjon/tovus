@@ -9,11 +9,11 @@ export function OwnerNav() {
   const { t } = useApp();
 
   const items = [
-    { href: "/owner", label: t("miniapp.ownerNavDashboard"), icon: "🛡" },
-    { href: "/owner/shadow", label: t("miniapp.ownerNavShadow"), icon: "🎯" },
-    { href: "/owner/bans", label: t("miniapp.ownerNavBans"), icon: "⛔" },
-    { href: "/owner/broadcast", label: t("miniapp.ownerNavBroadcast"), icon: "📣" },
-    { href: "/owner/tools", label: t("miniapp.ownerNavTools"), icon: "🔧" },
+    { href: "/app/owner", label: t("miniapp.ownerNavDashboard"), icon: "🛡" },
+    { href: "/app/owner/shadow", label: t("miniapp.ownerNavShadow"), icon: "🎯" },
+    { href: "/app/owner/bans", label: t("miniapp.ownerNavBans"), icon: "⛔" },
+    { href: "/app/owner/broadcast", label: t("miniapp.ownerNavBroadcast"), icon: "📣" },
+    { href: "/app/owner/tools", label: t("miniapp.ownerNavTools"), icon: "🔧" },
   ];
 
   return (

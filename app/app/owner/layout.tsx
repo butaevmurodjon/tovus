@@ -19,7 +19,7 @@ export default function OwnerLayout({ children }: { children: React.ReactNode })
 
   return (
     <>
-      <TopBar title={t("miniapp.ownerTitle")} backHref="/" />
+      <TopBar title={t("miniapp.ownerTitle")} backHref="/app" />
       <main className="flex-1 pb-20">{children}</main>
       <OwnerNav />
     </>

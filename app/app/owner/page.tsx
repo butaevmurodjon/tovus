@@ -117,7 +117,7 @@ export default function OwnerDashboardPage() {
           </p>
         )}
         {groups.map((g) => (
-          <Link key={g.chatId} href={`/group/${g.chatId}`} className="block">
+          <Link key={g.chatId} href={`/app/group/${g.chatId}`} className="block">
             <Card className="p-3.5 active:opacity-70 transition-opacity">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">

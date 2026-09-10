@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import Script from "next/script";
-import { Providers } from "./providers";
 import { SITE_NAME, SITE_URL } from "@/lib/seo";
 import "./globals.css";
 
@@ -80,7 +79,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
       </head>
       <body className="min-h-full flex flex-col">
-        <Providers>{children}</Providers>
+        {/* AppProvider now lives in app/app/layout.tsx — the marketing pages
+            (`/`, `/privacy`) don't need it. */}
+        {children}
       </body>
     </html>
   );

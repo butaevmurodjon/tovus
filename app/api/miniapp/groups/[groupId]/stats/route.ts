@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authorizeGroupAdmin } from "@/lib/telegram/miniAppAuth";
 import { getActivity, getDailyStats, getStats, getTopActiveHours, type StatsPeriod } from "@/lib/db/stats";
+import { getReactionStats } from "@/lib/db/reactionStats";
 import { getGroupSettings } from "@/lib/db/groups";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { getApi } from "@/lib/telegram/api";
@@ -34,12 +35,13 @@ export async function GET(req: Request, { params }: { params: Promise<{ groupId:
   const memberCount = await getCachedMemberCount(getApi(), chatId);
   const topHoursEligible = canUseProFeature(settings, memberCount);
 
-  const [summary, daily, activity, topHours] = await Promise.all([
+  const [summary, daily, activity, topHours, reaction] = await Promise.all([
     getStats(chatId, period),
     getDailyStats(chatId, period === "30d" ? 30 : 14),
     getActivity(chatId, period),
     topHoursEligible ? getTopActiveHours(chatId, period) : Promise.resolve([]),
+    getReactionStats(chatId, period),
   ]);
 
-  return NextResponse.json({ period, summary, daily, activity, topHours, topHoursEligible });
+  return NextResponse.json({ period, summary, daily, activity, topHours, topHoursEligible, reaction });
 }

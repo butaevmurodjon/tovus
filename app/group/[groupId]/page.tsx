@@ -515,6 +515,13 @@ export default function GroupSettingsPage() {
           <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
             {t("miniapp.deleteServiceMessagesHint")}
           </p>
+          <Divider />
+          <Row label={t("miniapp.deleteNoticeTitle")}>
+            <Toggle checked={settings.deleteNotice} onChange={(v) => setField("deleteNotice", v)} />
+          </Row>
+          <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
+            {t("miniapp.deleteNoticeHint")}
+          </p>
         </CardSection>
       </Card>
 

@@ -9,6 +9,7 @@ import {
 } from "@/lib/db/groups";
 import { addCustomWord, addCustomWords, getCustomWords, removeCustomWord } from "@/lib/db/customWords";
 import { getStats } from "@/lib/db/stats";
+import { getReactionStats } from "@/lib/db/reactionStats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { canUseProFeature, formatPlanLabel, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
 import { PRESETS, isPresetKey } from "@/lib/moderation/presets";
@@ -504,8 +505,16 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireGroupChat(ctx, lang))) return;
     const argRaw = ctx.match?.toString().trim().toLowerCase();
     const period = argRaw === "today" || argRaw === "30d" ? argRaw : "7d";
-    const stats = await getStats(ctx.chat!.id, period);
+    const [stats, reaction] = await Promise.all([
+      getStats(ctx.chat!.id, period),
+      getReactionStats(ctx.chat!.id, period),
+    ]);
     const periodLabel = period === "today" ? t(lang, "miniapp.periodToday") : period === "30d" ? t(lang, "miniapp.period30d") : t(lang, "miniapp.period7d");
+    const reactionMs = reaction.base.meanVisibleMs ?? reaction.base.meanProcMs;
+    const reactionLine =
+      reactionMs === null
+        ? ""
+        : "\n" + t(lang, "bot.statsReactionLine", { seconds: (reactionMs / 1000).toFixed(1) });
     await ctx.reply(
       t(lang, "bot.statsHeader", { period: periodLabel }) +
         "\n" +
@@ -514,7 +523,8 @@ export function registerCommands(bot: Bot): void {
           profanity: stats.profanity,
           spam: stats.spam,
           premium: stats.premium,
-        })
+        }) +
+        reactionLine
     );
   });
 }

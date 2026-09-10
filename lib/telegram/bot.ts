@@ -317,6 +317,9 @@ export function getBot(): Bot {
   });
 
   bot.on(["message", "edited_message"], async (ctx) => {
+    // Monotonic clock, captured before any await — start of the "время реакции"
+    // measurement finalized in applyViolation (lib/db/reactionStats.ts).
+    const receivedAt = performance.now();
     const message = ctx.message ?? ctx.editedMessage;
     const isEdit = !ctx.message;
     const chat = ctx.chat;
@@ -518,7 +521,12 @@ export function getBot(): Bot {
     after(() => collectModerationSample(message, settings, verdict, { isEdit }).catch(() => {}));
     if (!verdict) return;
 
-    const sideEffectsAfterVerdict = [applyViolation(ctx.api, message, settings, verdict)];
+    // edit_date is the fresh timestamp for an edit; message.date would be the
+    // original send time (possibly hours ago) and poison the visible-time avg.
+    const sentAtSec = isEdit ? message.edit_date ?? message.date : message.date;
+    const sideEffectsAfterVerdict = [
+      applyViolation(ctx.api, message, settings, verdict, { receivedAt, sentAtMs: sentAtSec * 1000 }),
+    ];
     // One hit per finalized verdict, not per detector — see reputation.ts.
     // Excludes night mode's blanket restriction (countsTowardReputation: false).
     if (verdict.countsTowardReputation !== false) {

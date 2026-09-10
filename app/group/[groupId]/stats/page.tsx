@@ -11,6 +11,7 @@ import { HourlyActivityChart } from "@/components/HourlyActivityChart";
 import { Badge } from "@/components/Badge";
 import { StatusScreen } from "@/components/StatusScreen";
 import type { ActivityBucket, DailyStatsPoint, HourlyActivityPoint } from "@/lib/db/stats";
+import type { ReactionStats } from "@/lib/db/reactionStats";
 import type { StatsBucket } from "@/lib/db/types";
 
 type Period = "today" | "7d" | "30d";
@@ -22,6 +23,7 @@ interface StatsResponse {
   activity: ActivityBucket;
   topHours: HourlyActivityPoint[];
   topHoursEligible: boolean;
+  reaction: ReactionStats;
 }
 
 export default function GroupStatsPage() {
@@ -30,6 +32,10 @@ export default function GroupStatsPage() {
   const [period, setPeriod] = useState<Period>("7d");
   const [data, setData] = useState<StatsResponse | null>(null);
   const [error, setError] = useState(false);
+
+  const fmtSec = (ms: number | null) =>
+    ms == null ? "—" : `${(ms / 1000).toFixed(1)} ${t("miniapp.secShort")}`;
+  const fmtMs = (ms: number | null) => (ms == null ? "—" : `${ms} ${t("miniapp.msShort")}`);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,6 +82,31 @@ export default function GroupStatsPage() {
             <StatTile label={t("miniapp.bySpam")} value={data.summary.spam} />
             <StatTile label={t("miniapp.byPremium")} value={data.summary.premium} />
           </div>
+
+          {(data.reaction.base.count > 0 || data.reaction.ai.count > 0) && (
+            <Card>
+              <CardSection title={t("miniapp.reactionTitle")}>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <StatTile
+                    label={t("miniapp.reactionVisible")}
+                    value={fmtSec(data.reaction.base.meanVisibleMs ?? data.reaction.base.meanProcMs)}
+                    accent
+                  />
+                  <StatTile label={t("miniapp.reactionProcP95")} value={fmtMs(data.reaction.base.p95ProcMs)} />
+                </div>
+                {data.reaction.ai.count > 0 && (
+                  <p className="text-[12px] mt-2.5" style={{ color: "var(--ink-muted)" }}>
+                    {t("miniapp.reactionAiLine", {
+                      value: fmtSec(data.reaction.ai.meanVisibleMs ?? data.reaction.ai.meanProcMs),
+                    })}
+                  </p>
+                )}
+                <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
+                  {t("miniapp.reactionHint")}
+                </p>
+              </CardSection>
+            </Card>
+          )}
 
           <Card>
             <CardSection title={t("miniapp.statsTitle")}>

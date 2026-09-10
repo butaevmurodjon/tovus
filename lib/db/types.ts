@@ -68,6 +68,13 @@ export interface GroupSettings {
   /** Deletes Telegram's own "X joined/added/left the group" service messages.
    * On by default — purely cosmetic chat cleanup, no moderation tradeoff. */
   deleteServiceMessages: boolean;
+  /** Off by default: when the action is a silent "delete", also post one short
+   * public notice ("сообщение удалено — не размещайте рекламу", with the
+   * reaction time). The notice replaces itself on the next moderation event
+   * (see lib/db/autoNotice.ts), so at most one is ever visible. Kept opt-in
+   * because turning it on changes outward behaviour in the chat — the delete
+   * action is silent by design otherwise. */
+  deleteNotice: boolean;
   /** Off by default: deletes forwarded messages, links, and media/stickers from
    * a member for their first `restrictNewMembersMinutes` minutes after joining —
    * the dominant vector for freshly-joined spam/scam accounts (ad forwards,
@@ -106,6 +113,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   welcomeEnabled: false,
   welcomeMessage: null,
   deleteServiceMessages: true,
+  deleteNotice: false,
   restrictNewMembersEnabled: false,
   restrictNewMembersMinutes: 10,
   nightModeEnabled: false,

@@ -16,6 +16,7 @@ export type OwnerAuditAction =
   | "airule_remove"
   | "broadcast"
   | "group_ban"
+  | "group_unban"
   | "group_delete"
   | "group_resetrep";
 

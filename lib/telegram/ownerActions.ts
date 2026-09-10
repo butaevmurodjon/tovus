@@ -15,7 +15,7 @@ export type OwnerActionCheck =
 export async function authorizeOwnerAction(
   api: Api,
   chatId: number,
-  action: "delete" | "ban"
+  action: "delete" | "ban" | "unban"
 ): Promise<OwnerActionCheck> {
   if (!(await isRegisteredGroup(chatId))) return { ok: false, error: "group_unavailable" };
 
@@ -24,7 +24,8 @@ export async function authorizeOwnerAction(
   if (action === "delete" && !permissions.canDeleteMessages) {
     return { ok: false, error: "missing_delete_permission" };
   }
-  if (action === "ban" && !permissions.canRestrictMembers) {
+  // unbanChatMember needs the same "restrict members" right as a ban.
+  if ((action === "ban" || action === "unban") && !permissions.canRestrictMembers) {
     return { ok: false, error: "missing_restrict_permission" };
   }
   return { ok: true };

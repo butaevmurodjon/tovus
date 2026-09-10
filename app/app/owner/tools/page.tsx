@@ -42,7 +42,9 @@ export default function OwnerToolsPage() {
   const [input, setInput] = useState("");
   const [resolving, setResolving] = useState(false);
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
-  const [acting, setActing] = useState<"delete" | "ban-group" | "ban-everywhere" | "ban-and-delete" | null>(null);
+  const [acting, setActing] = useState<
+    "delete" | "ban-group" | "ban-everywhere" | "ban-and-delete" | "unban-group" | null
+  >(null);
 
   async function resolve() {
     if (!input.trim()) return;
@@ -130,6 +132,27 @@ export default function OwnerToolsPage() {
     }
   }
 
+  async function unbanResolvedAuthorInGroup() {
+    if (!resolved || resolved.type !== "message" || !resolved.authorUserId) return;
+    const userId = resolved.authorUserId;
+    if (!(await confirmAction(`Снять бан с пользователя ${userId} в этой группе?`))) return;
+    haptic("medium");
+    setActing("unban-group");
+    try {
+      await fetcher(`/api/miniapp/owner/groups/${resolved.chatId}/unban`, {
+        method: "POST",
+        body: JSON.stringify({ userId }),
+      });
+      hapticNotify("success");
+      flash("Бан снят в этой группе.");
+    } catch (error) {
+      hapticNotify("error");
+      flash(ownerActionErrorText(error));
+    } finally {
+      setActing(null);
+    }
+  }
+
   async function banResolvedUserEverywhere() {
     if (!resolved) return;
     const userId = resolved.type === "user" ? resolved.userId : resolved.authorUserId;
@@ -140,7 +163,7 @@ export default function OwnerToolsPage() {
     try {
       await fetcher("/api/miniapp/owner/globalban", {
         method: "POST",
-        body: JSON.stringify({ userId, reason: "God Mode: бан по ссылке/юзернейму" }),
+        body: JSON.stringify({ userId, reason: "Панель владельца: бан по ссылке/юзернейму" }),
       });
       hapticNotify("success");
       flash("Пользователь забанен везде.");
@@ -257,6 +280,9 @@ export default function OwnerToolsPage() {
                     </Button>
                     <Button variant="secondary" onClick={banResolvedUserEverywhere} disabled={acting !== null}>
                       {acting === "ban-everywhere" ? "Баним…" : "Забанить во всех группах"}
+                    </Button>
+                    <Button variant="secondary" onClick={unbanResolvedAuthorInGroup} disabled={acting !== null}>
+                      {acting === "unban-group" ? "Снимаем…" : "Разбанить в этой группе"}
                     </Button>
                   </>
                 )}

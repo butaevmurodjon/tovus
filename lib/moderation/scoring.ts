@@ -26,6 +26,7 @@ import { getAllowlist } from "@/lib/db/allowlist";
 import { getReputationScore } from "./reputation";
 import { isWithinNewMemberWindow, peekDuplicateFloodCount, peekUserFloodCount } from "./flood";
 import { classifyDivergence, recordShadowScoring, type DivergenceSample } from "@/lib/db/shadowStats";
+import { checkNearDuplicateShadow } from "./nearDuplicateShadow";
 
 // §4 Этап 1 — shadow-only scoring engine. Deliberately scoped down from the
 // full §4 pipeline for this first commit (see the reasoning below and in the
@@ -365,6 +366,25 @@ export async function runShadowScoring(
   if (dupFloodCount > DUPLICATE_MAX_COUNT) {
     signals.push({ name: "duplicate_flood", weight: 60, evidence: `${dupFloodCount} repeats` });
   }
+
+  // Near-duplicate ("neurocommenting"/reworded spam) fingerprinting — see
+  // simhash.ts and nearDuplicateShadow.ts for why this is co-occurrence-gated
+  // (only runs when the message already tripped some other spam signal) and
+  // shadow-only (never contributes to a real ban/mute/delete). Deliberately
+  // OUTSIDE the Promise.all above: it always records this message's own
+  // fingerprint as a side effect, so it must run after collectSpamSignals
+  // decided whether there's anything else to gate it on, not concurrently.
+  if (signals.length > 0) {
+    const nearDup = await checkNearDuplicateShadow(settings.chatId, text).catch(() => null);
+    if (nearDup && nearDup.matches > 0) {
+      signals.push({
+        name: "near_duplicate_content",
+        weight: 40,
+        evidence: `${nearDup.matches} similar (min dist ${nearDup.minDistance})`,
+      });
+    }
+  }
+
   const result = scoreSignals(signals, reputationScore, isNewAccount);
   const latencyMs = performance.now() - startedAt;
 

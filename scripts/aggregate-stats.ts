@@ -61,12 +61,16 @@ async function main() {
   }
 
   console.log("=== TG-ATISPAM aggregate moderation stats (production, last 30 days) ===\n");
-  console.log(`groups managed:        ${chatIds.length}`);
-  console.log(`messages checked:      ${totals.total}`);
-  console.log(`  profanity:           ${totals.profanity}`);
-  console.log(`  spam:                ${totals.spam}`);
-  console.log(`  premium-emoji spam:  ${totals.premium}`);
-  console.log(`\nreason-tag breakdown (trailing 30d ending yesterday, total=${digestTotal}):`);
+  console.log(`groups managed:              ${chatIds.length}`);
+  console.log(`moderation actions taken:    ${totals.total}`);
+  console.log(`  profanity:                 ${totals.profanity}`);
+  console.log(`  spam:                      ${totals.spam}`);
+  console.log(`  AI-classifier (/premium):  ${totals.premium}`);
+  console.log(
+    `\nreason-tag breakdown (trailing 30d ending yesterday, total=${digestTotal}) — ` +
+      `feature just shipped (see git log for lib/moderation/reasonTags.ts), not enough ` +
+      `history yet to be meaningful:`
+  );
   const sorted = [...REASON_TAGS].sort((a, b) => byTag[b] - byTag[a]);
   for (const tag of sorted) {
     console.log(`  ${tag.padEnd(14)} ${byTag[tag]}`);

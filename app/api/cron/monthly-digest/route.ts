@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getApi } from "@/lib/telegram/api";
 import { getGroupSettings, listAllGroupIds, updateGroupSettings } from "@/lib/db/groups";
-import { dateKey, getCachedBestDigestHour, getMonthlyDigestStats, pickDigestDayOfMonth } from "@/lib/db/stats";
+import { getMonthlyDigestStats, pickDigestDayOfMonth } from "@/lib/db/stats";
 import { buildDigestMessage } from "@/lib/telegram/monthlyDigest";
 
 export const runtime = "nodejs";
@@ -15,15 +15,25 @@ function currentYearMonthUtc(now: Date): string {
 
 type GroupOutcome = "sent" | "skipped" | "failed";
 
-/** One group's worth of the cron's per-tick work: figure out whether THIS is
- * the one hour this month this group should get its digest, and send it if
- * so. Every early return here is "skipped", not "failed" — this function
- * runs once an hour for every managed group, so "not this group's moment
- * yet" is the overwhelmingly common outcome, not an error. */
+/**
+ * One group's worth of the cron's per-run work: figure out whether TODAY is
+ * this group's one digest day this month, and send if so.
+ *
+ * Originally designed to also target each group's own best-activity HOUR
+ * (see `pickBestDigestHour`/`getCachedBestDigestHour` in stats.ts, still used
+ * and tested elsewhere) via an hourly cron tick. Vercel's Hobby plan only
+ * allows a DAILY cron schedule — `vercel --prod` outright rejects an hourly
+ * `crons` entry on that plan (discovered at deploy time, see vercel.json's
+ * schedule) — so with only one tick a day, hour-matching would almost never
+ * fire. Degraded gracefully to day-only targeting: `pickDigestDayOfMonth`
+ * still spreads sends across the month, just not to a specific hour within
+ * that day. Upgrading to Vercel Pro + an hourly `crons` schedule restores
+ * true best-hour targeting without any other code change.
+ */
 async function processGroup(chatId: number, now: Date): Promise<GroupOutcome> {
-  // Pure, zero-I/O, and already excludes ~27/28 of groups on any given day —
+  // Pure, zero-I/O, and already excludes 27/28 of groups on any given day —
   // checked BEFORE the Redis reads below so most groups cost this function
-  // nothing every hour except a modulo, not a settings fetch.
+  // nothing every run except a modulo, not a settings fetch.
   if (now.getUTCDate() !== pickDigestDayOfMonth(chatId)) return "skipped";
 
   const settings = await getGroupSettings(chatId);
@@ -31,17 +41,9 @@ async function processGroup(chatId: number, now: Date): Promise<GroupOutcome> {
   if (settings.monthlyDigestEnabled === false) return "skipped";
 
   const yearMonth = currentYearMonthUtc(now);
-  // Idempotency guard: without this, the hourly cron would re-send for the
-  // rest of THIS group's send hour (multiple ticks can land inside the same
-  // minute-0..59 hour on a redeploy/retry) and, without the day+hour gate
-  // failing on every other day, every hour of every day for the whole month.
+  // Idempotency guard: without this, a redeploy/retry landing on the same UTC
+  // date as a prior successful send this month would re-send.
   if (settings.lastDigestSentMonth === yearMonth) return "skipped";
-
-  // Cached per (chatId, UTC date) — see getCachedBestDigestHour — so only the
-  // FIRST of this group's ~24 eligible-day ticks actually re-scans 30 days of
-  // hourly buckets; every later tick that day is a single cheap key read.
-  const bestHour = await getCachedBestDigestHour(chatId, dateKey(now));
-  if (now.getUTCHours() !== bestHour) return "skipped";
 
   // Trailing 30-days-ending-yesterday rather than "the previous calendar
   // month" — see getMonthlyDigestStats' doc comment for why: send days are
@@ -66,7 +68,8 @@ async function processGroup(chatId: number, now: Date): Promise<GroupOutcome> {
 }
 
 /**
- * Runs hourly (see vercel.json's crons entry). Vercel Cron always calls with
+ * Runs once daily (see vercel.json's crons entry — Hobby-plan limitation, see
+ * processGroup's doc comment). Vercel Cron always calls with
  * an `Authorization: Bearer $CRON_SECRET` header (set automatically when the
  * CRON_SECRET env var exists on the project — nothing to configure in
  * vercel.json's cron entry itself, it only takes path+schedule) — see

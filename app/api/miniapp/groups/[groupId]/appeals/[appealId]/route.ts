@@ -1,10 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { authorizeGroupAdmin } from "@/lib/telegram/miniAppAuth";
 import { findAppeal, setAppealOffer, setAppealStatus } from "@/lib/db/appeals";
 import { getGroupSettings } from "@/lib/db/groups";
 import { getApi } from "@/lib/telegram/api";
 import { t } from "@/lib/i18n";
 import { MAX_UNBAN_PRICE_STARS, MIN_UNBAN_PRICE_STARS, sendUnbanInvoice } from "@/lib/telegram/payments";
+import { recordAdminLabel } from "@/lib/moderation/corpusCollector";
 
 export const runtime = "nodejs";
 
@@ -86,6 +87,34 @@ export async function PATCH(
       .sendMessage(entry.userId, t(settings.lang, "bot.appealResolvedUnban", { title: settings.title }))
       .catch(() => {});
     const updated = await setAppealStatus(chatId, appealId, "resolved");
+
+    // An admin approving an appeal is a real gold false-positive signal ("the
+    // ban itself was wrong") — same treatment as journal.ts's restore path,
+    // just weaker evidence: only the appellant's own appeal text is on hand
+    // here, not the original offending message (AppealEntry never links back
+    // to it), so detVerdict/detSource stay null and this uses its own
+    // goldSource ("admin_appeal_unban", see corpus.ts) rather than
+    // "admin_restore". messageId: 0 — there's no real Telegram message this
+    // sample corresponds to, only the appeal text itself; recordAdminLabel
+    // dedups on text hash, not messageId, so this doesn't collide with real
+    // messages. Best-effort, never blocks the response; hard no-op unless
+    // CORPUS_ENABLED.
+    after(() =>
+      recordAdminLabel({
+        chatId,
+        messageId: 0,
+        userId: entry.userId,
+        username: entry.username,
+        displayName: entry.displayName,
+        text: entry.text,
+        detVerdict: null,
+        detSource: null,
+        goldLabel: "none",
+        goldSource: "admin_appeal_unban",
+        goldBy: auth.user.id,
+      }).catch(() => {})
+    );
+
     return NextResponse.json({ entry: updated });
   }
 

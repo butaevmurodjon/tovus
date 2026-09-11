@@ -192,7 +192,13 @@ export function registerCommands(bot: Bot): void {
     }
     if (ctx.chat.type === "group" || ctx.chat.type === "supergroup") {
       await registerGroup(ctx.chat.id, ctx.chat.title ?? "", detectLang(ctx.from?.language_code));
-      await ctx.reply(t(lang, "bot.welcomeGroup"));
+      // Appends the data-storage disclosure only once CORPUS_ENABLED actually
+      // flips on in prod — until then this text never appears, no separate
+      // deploy needed for it to show up the moment the flag does. Lives on
+      // welcomeGroup (not welcomePrivate/help) since this is specifically
+      // about moderating THIS group's members' content, not the bot generally.
+      const notice = corpusEnabled() ? `\n\n${t(lang, "bot.dataStorageNotice")}` : "";
+      await ctx.reply(t(lang, "bot.welcomeGroup") + notice);
     }
   });
 

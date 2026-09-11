@@ -29,7 +29,18 @@ const DEFAULT_BUFFER_MAX = 5000;
 const MAX_TEXT = 4000;
 
 export type GoldLabel = "spam" | "scam" | "profanity" | "none";
-export type GoldSource = "admin_restore" | "admin_report" | "admin_ban" | "hand_label";
+/**
+ * "admin_appeal_unban" is weaker evidence than "admin_restore": a restore
+ * carries the actual offending message (text + detVerdict), so it's a
+ * precise "the bot was wrong about THIS text" sample. An appeal-unban only
+ * carries the appellant's own appeal message (why they think they were
+ * banned) — the original violating message/category isn't linked to
+ * `AppealEntry` at all — so this only confirms "an admin agreed the ban
+ * itself was wrong," without pinning that to a specific mislabelled text.
+ * Still worth collecting (real gold false-positive signal, currently
+ * dropped entirely), just don't treat it as equivalent when calibrating.
+ */
+export type GoldSource = "admin_restore" | "admin_report" | "admin_ban" | "hand_label" | "admin_appeal_unban";
 export type AiLabel = "spam" | "scam" | "profanity" | "none";
 
 /** Deterministic-pipeline signal, mirrored from scoring.ts's Signal (name+weight only). */

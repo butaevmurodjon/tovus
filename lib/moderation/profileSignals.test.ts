@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { User } from "grammy/types";
-import { detectBadProfileSignal } from "./profileSignals";
+import { detectBadBioSignal, detectBadProfileSignal } from "./profileSignals";
 
 function user(overrides: Partial<User>): User {
   return { id: 999, is_bot: false, first_name: "Test", ...overrides } as User;
@@ -37,5 +37,25 @@ describe("detectBadProfileSignal", () => {
 
   it("returns null for a user with no name/username at all", () => {
     expect(detectBadProfileSignal(user({ first_name: "", username: undefined }))).toBeNull();
+  });
+});
+
+describe("detectBadBioSignal", () => {
+  it("returns null for no bio", () => {
+    expect(detectBadBioSignal(undefined)).toBeNull();
+    expect(detectBadBioSignal(null)).toBeNull();
+    expect(detectBadBioSignal("")).toBeNull();
+  });
+
+  it("returns null for an ordinary bio", () => {
+    expect(detectBadBioSignal("Люблю путешествия и фотографию")).toBeNull();
+  });
+
+  it("flags obscene language in the bio", () => {
+    expect(detectBadBioSignal("хуй")).toContain("нецензурн");
+  });
+
+  it("flags a scam/earn-fast bio phrase", () => {
+    expect(detectBadBioSignal("Пассивный доход от 500$ в директ")).toContain("скам");
   });
 });

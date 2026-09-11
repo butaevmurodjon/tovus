@@ -30,7 +30,8 @@ import { checkRaid, markNewMember } from "@/lib/moderation/flood";
 import { isCasBanned } from "@/lib/moderation/cas";
 import { markNewMemberRestricted } from "@/lib/moderation/newMemberGuard";
 import { isLikelyAdminImpersonation } from "@/lib/moderation/impersonation";
-import { detectBadProfileSignal } from "@/lib/moderation/profileSignals";
+import { detectBadBioSignal, detectBadProfileSignal } from "@/lib/moderation/profileSignals";
+import { isLikelyNewAccount } from "@/lib/moderation/accountAge";
 import { recordReputationHit } from "@/lib/moderation/reputation";
 import { runShadowScoring } from "@/lib/moderation/scoring";
 import { collectModerationSample, recordAdminLabel } from "@/lib/moderation/corpusCollector";
@@ -521,11 +522,29 @@ export function getBot(): Bot {
               await recordReputationHit(chat.id, member.id).catch(() => {});
             }
 
-            // Obscene/scam-looking name, last name, or @username — see
+            // Obscene/scam-looking name, last name, @username, or bio — see
             // profileSignals.ts for why this is text-only (no avatar-photo
             // check). Same soft treatment as isImpersonator above: never a
             // punishment by itself, just forces verification + a journal note.
-            const badProfile = detectBadProfileSignal(member);
+            //
+            // Gated on isLikelyNewAccount (owner's call, 2026-09-11): an
+            // established account with a crude nickname/bio is normal noise
+            // this bot shouldn't be forcing captcha over; the same text on an
+            // ID that looks freshly-created is the actual spam-onboarding
+            // pattern this is meant to catch. Also spares the extra getChat
+            // call (needed for bio, not in the join update already) on the
+            // large majority of joiners who aren't new accounts at all.
+            let badProfile: string | null = null;
+            if (isLikelyNewAccount(member.id)) {
+              badProfile = detectBadProfileSignal(member);
+              if (!badProfile) {
+                const bio = await ctx.api
+                  .getChat(member.id)
+                  .then((info) => ("bio" in info ? info.bio : undefined))
+                  .catch(() => undefined);
+                badProfile = detectBadBioSignal(bio);
+              }
+            }
             if (badProfile) {
               await logJoinSignal(chat.id, message, member, badProfile);
             }

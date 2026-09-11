@@ -29,14 +29,32 @@ export function detectBadProfileSignal(member: User): string | null {
     .filter((p): p is string => Boolean(p && p.trim()))
     .join(" ");
   if (!parts) return null;
+  return matchScamOrProfanity(parts, "имя/юзернейм");
+}
 
-  if (detectProfanity(parts).matched) {
-    return "имя/юзернейм с нецензурной лексикой";
+/**
+ * Same check as detectBadProfileSignal, applied to the "About" bio text
+ * instead of name/username/@handle. Split into its own function (rather than
+ * folded into detectBadProfileSignal) because the bio isn't on the `User`
+ * object the join update already carries — the caller has to spend an extra
+ * `getChat` call to fetch it, so it's gated separately (owner's call,
+ * 2026-09-11: only run for accounts that look freshly-created, see
+ * accountAge.ts) instead of running unconditionally on every joiner like the
+ * free name/username check above.
+ */
+export function detectBadBioSignal(bio: string | null | undefined): string | null {
+  if (!bio || !bio.trim()) return null;
+  return matchScamOrProfanity(bio, "bio");
+}
+
+function matchScamOrProfanity(text: string, label: "имя/юзернейм" | "bio"): string | null {
+  if (detectProfanity(text).matched) {
+    return `${label} с нецензурной лексикой`;
   }
 
-  const lower = parts.toLowerCase();
+  const lower = text.toLowerCase();
   if (SCAM_PROFILE_MARKERS.some((marker) => lower.includes(marker))) {
-    return "имя/юзернейм похоже на скам- или интим-предложение";
+    return `${label} похоже на скам- или интим-предложение`;
   }
 
   return null;

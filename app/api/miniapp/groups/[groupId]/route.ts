@@ -47,7 +47,10 @@ export async function GET(
     settings,
     missingPermissions,
     memberCount,
-    proFeaturesEligible: canUseProFeature(settings, memberCount),
+    // Captcha/antiraid are unconditionally free now (Phase 1 re-cut) — this
+    // only gates federation (the remaining size-limited Pro feature the group
+    // settings page shows a lock on).
+    federationEligible: canUseProFeature(settings, memberCount),
     whitelistCount: whitelist.length,
     violationsToday: todayStats.total,
   });
@@ -71,31 +74,27 @@ export async function PATCH(
   const settings = await getGroupSettings(chatId);
   if (!settings) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  // Same eligibility rule the bot enforces at join time (bot.ts) and the chat
-  // commands gate on (commands.ts `requireProFeature`): active Pro OR small
-  // enough for the free-tier grace. Using `isProActive` alone here wrongly
-  // rejected captcha/antiraid for a ≤200-member group that gets them free.
+  // Same eligibility rule `requireProFeature` gates on in commands.ts: active
+  // Pro OR small enough for the free-tier grace. Only `federationEnabled` is
+  // still gated here — captcha/antiraid are unconditionally free (Phase 1
+  // re-cut) and never rejected.
   const memberCount = await getCachedMemberCount(getApi(), chatId);
   const eligible = canUseProFeature(settings, memberCount);
 
   const rejected: string[] = [];
-  const gateKeys = ["captchaEnabled", "antiraidEnabled", "federationEnabled"] as const;
+  const gateKeys = ["federationEnabled"] as const;
   if (!eligible) {
-    // "rules" is a free captcha type (§15.3) — enabling captcha while that
-    // type is (or is becoming) active must not be rejected as a Pro feature.
-    const resolvedCaptchaType = patch.captchaType ?? settings.captchaType;
     for (const key of gateKeys) {
       if (patch[key] !== true) continue;
-      if (key === "captchaEnabled" && resolvedCaptchaType === "rules") continue;
       rejected.push(key);
     }
   }
 
   // Strip the rejected keys so an ineligible group can't persist a Pro toggle
   // through the Mini App — the chat commands already prevent this by gating
-  // before `updateGroupSettings`. Matters most for `federationEnabled`: unlike
-  // captcha/antiraid, federation.ts trusts the stored flag and never re-checks
-  // size eligibility, so a persisted `true` would be a real entitlement bypass.
+  // before `updateGroupSettings`. Matters for `federationEnabled`: federation.ts
+  // trusts the stored flag and never re-checks size eligibility, so a
+  // persisted `true` would be a real entitlement bypass.
   const effectivePatch = { ...patch };
   for (const key of rejected) delete effectivePatch[key as keyof GroupSettings];
 
@@ -104,6 +103,6 @@ export async function PATCH(
     settings: updated,
     rejected,
     memberCount,
-    proFeaturesEligible: canUseProFeature(updated ?? settings, memberCount),
+    federationEligible: canUseProFeature(updated ?? settings, memberCount),
   });
 }

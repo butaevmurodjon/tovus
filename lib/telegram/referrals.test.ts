@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRefPayload } from "./commands";
+import { parseAppealPayload, parseRefPayload } from "./commands";
 
 // The `?start=` payload is the one fully attacker-controlled input in the
 // referral loop — anyone can send /start with any text. It must resolve to a
@@ -39,5 +39,39 @@ describe("parseRefPayload", () => {
     expect(parseRefPayload("")).toBeNull();
     expect(parseRefPayload(undefined)).toBeNull();
     expect(parseRefPayload(null)).toBeNull();
+  });
+});
+
+// Same attacker-controlled `?start=` payload as parseRefPayload above, but the
+// id here is a chat id — always negative for a supergroup — not a user id.
+describe("parseAppealPayload", () => {
+  it("reads a well-formed appeal_ payload with a negative supergroup chat id", () => {
+    expect(parseAppealPayload("appeal_-1001234567890")).toBe(-1001234567890);
+  });
+
+  it("reads a positive chat id too (small/legacy group chats)", () => {
+    expect(parseAppealPayload("appeal_123456")).toBe(123456);
+  });
+
+  it("tolerates surrounding whitespace", () => {
+    expect(parseAppealPayload("  appeal_-100  ")).toBe(-100);
+  });
+
+  it("ignores ref_ and src_ payloads (handled separately)", () => {
+    expect(parseAppealPayload("ref_42")).toBeNull();
+    expect(parseAppealPayload("src_habr")).toBeNull();
+  });
+
+  it("rejects non-numeric, partial and decorated payloads", () => {
+    expect(parseAppealPayload("appeal_12a")).toBeNull();
+    expect(parseAppealPayload("appeal_1.5")).toBeNull();
+    expect(parseAppealPayload("xappeal_15")).toBeNull();
+    expect(parseAppealPayload("appeal_")).toBeNull();
+  });
+
+  it("returns null for a bare /start with no payload", () => {
+    expect(parseAppealPayload("")).toBeNull();
+    expect(parseAppealPayload(undefined)).toBeNull();
+    expect(parseAppealPayload(null)).toBeNull();
   });
 });

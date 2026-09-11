@@ -13,6 +13,14 @@ import { getReactionStats } from "@/lib/db/reactionStats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { countReferrals, setPendingRef } from "@/lib/db/referrals";
 import {
+  addAppeal,
+  clearPendingAppeal,
+  getPendingAppeal,
+  isAppealOnCooldown,
+  setPendingAppeal,
+  tryStartAppealCooldown,
+} from "@/lib/db/appeals";
+import {
   REFERRAL_GROUPS_FOR_REWARD,
   REFERRAL_MIN_MEMBERS,
   REFERRAL_REWARD_MONTHS,
@@ -27,6 +35,7 @@ import { formatPermissionWarning, getBotPermissions, isBotAdminOfChat, isChatAdm
 import { sendUpgradeInvoice } from "./payments";
 import { normalizeWelcomeMessage } from "./welcome";
 import { normalizeRulesText } from "./captcha";
+import { displayName } from "./format";
 
 function miniAppButtonUrl(startParam: string): string | null {
   const username = process.env.TELEGRAM_BOT_USERNAME;
@@ -78,6 +87,26 @@ export function parseRefPayload(payload: string | undefined | null): number | nu
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
+/** `?start=appeal_<chatId>` — opens the bot in a PRIVATE chat and, once the
+ * member sends their next message there, delivers it as an appeal to that
+ * group's admins (see lib/db/appeals.ts, the /start and message:text
+ * handlers below). Same shape as referralUrl above. */
+export function appealUrl(chatId: number): string | null {
+  const username = process.env.TELEGRAM_BOT_USERNAME;
+  if (!username) return null;
+  return `https://t.me/${username}?start=appeal_${chatId}`;
+}
+
+/** `appeal_<chatId>` from a `?start=` payload — chatId is a Telegram group id,
+ * always negative for supergroups, so the digits need a leading `-`. */
+export function parseAppealPayload(payload: string | undefined | null): number | null {
+  if (!payload) return null;
+  const match = /^appeal_(-?\d{1,15})$/.exec(payload.trim());
+  if (!match) return null;
+  const chatId = Number(match[1]);
+  return Number.isSafeInteger(chatId) ? chatId : null;
+}
+
 async function requireGroupChat(ctx: Context, lang: Lang): Promise<boolean> {
   if (ctx.chat?.type === "group" || ctx.chat?.type === "supergroup") return true;
   await ctx.reply(t(lang, "bot.groupOnlyCommand"));
@@ -99,7 +128,9 @@ async function langFor(ctx: Context): Promise<Lang> {
   return detectLang(ctx.from?.language_code);
 }
 
-/** Shared gate for captcha/antiraid: active Pro subscription, or small enough for the free grace. */
+/** Shared gate for the size-limited Pro features (federation, active-hours analytics):
+ * active Pro subscription, or small enough for the free grace. Captcha and antiraid
+ * are unconditionally free (MONETIZATION.md §2 Phase 1) and no longer call this. */
 async function requireProFeature(ctx: Context, lang: Lang, chatId: number): Promise<boolean> {
   const settings = await getGroupSettings(chatId);
   if (!settings) return false;
@@ -125,6 +156,27 @@ export function registerCommands(bot: Bot): void {
       // `src_<campaign>` tags (landing page, catalogue listing, ad) — logged
       // only for now; GROWTH.md §4.4 wires these into GroupEvent.source later.
       if (/^src_[\w-]{1,32}$/.test(payload)) console.log("[start_src]", payload);
+
+      // "Написать администратору" deep link from a ban notice or /contact_admin
+      // (see appealUrl below). Puts this user into "waiting for appeal text"
+      // state and replies with the prompt instead of the generic welcome —
+      // the next private message from them becomes the appeal itself (handled
+      // by the message:text listener further down).
+      const appealChatId = parseAppealPayload(payload);
+      if (appealChatId !== null && ctx.from) {
+        const group = await getGroupSettings(appealChatId);
+        if (!group) {
+          await ctx.reply(t(lang, "bot.appealGroupUnavailable"));
+          return;
+        }
+        if (await isAppealOnCooldown(appealChatId, ctx.from.id)) {
+          await ctx.reply(t(group.lang, "bot.appealCooldown"));
+          return;
+        }
+        await setPendingAppeal(ctx.from.id, appealChatId);
+        await ctx.reply(t(group.lang, "bot.appealPrompt", { title: group.title }));
+        return;
+      }
 
       const url = process.env.TELEGRAM_MINI_APP_URL;
       const addUrl = addToGroupUrl();
@@ -178,6 +230,21 @@ export function registerCommands(bot: Bot): void {
         ]),
       }
     );
+  });
+
+  // Open to any member, not just admins — the whole point is a channel for
+  // someone the admin toggles (banned/muted) don't otherwise have, plus
+  // anyone who just wants to reach the admin (join request, question). Group
+  // chat only: it hands out a private deep link, so there's nothing to do in
+  // private chat itself (use it from the group you want to contact about).
+  bot.command("contact_admin", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    const link = appealUrl(ctx.chat!.id);
+    if (!link) return ctx.reply(t(lang, "bot.appealUnavailable"));
+    await ctx.reply(t(lang, "bot.appealButtonPrompt"), {
+      reply_markup: { inline_keyboard: [[{ text: t(lang, "bot.appealButton"), url: link }]] },
+    });
   });
 
   bot.command("panel", async (ctx) => {
@@ -240,6 +307,7 @@ export function registerCommands(bot: Bot): void {
       | "casCheckEnabled"
       | "restrictNewMembersEnabled"
       | "nightModeEnabled"
+      | "monthlyDigestEnabled"
   ) {
     bot.command(name, async (ctx) => {
       const lang = await langFor(ctx);
@@ -256,6 +324,7 @@ export function registerCommands(bot: Bot): void {
   toggleCommand("cascheck", "casCheckEnabled");
   toggleCommand("restrictnewmembers", "restrictNewMembersEnabled");
   toggleCommand("nightmode", "nightModeEnabled");
+  toggleCommand("digest", "monthlyDigestEnabled");
 
   bot.command("restrictminutes", async (ctx) => {
     const lang = await langFor(ctx);
@@ -289,14 +358,8 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireAdmin(ctx, lang))) return;
     const arg = ctx.match?.toString().trim().toLowerCase();
     if (arg !== "on" && arg !== "off") return ctx.reply("/captcha on|off");
-    if (arg === "on") {
-      // The "rules" gate is deliberately free (§15.3) — closer in spirit to
-      // welcomeMessage than to the button/math human-check types — so it skips
-      // the Pro requirement the other two types still need.
-      const settings = await getGroupSettings(ctx.chat!.id);
-      const isFreeRulesGate = settings?.captchaType === "rules";
-      if (!isFreeRulesGate && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
-    }
+    // Captcha is free for every group regardless of type or size (MONETIZATION.md
+    // §2 Phase 1) — no Pro gate here any more.
     await updateGroupSettings(ctx.chat!.id, { captchaEnabled: arg === "on" });
     await ctx.reply(t(lang, arg === "on" ? "bot.captchaOn" : "bot.captchaOff"));
   });
@@ -307,7 +370,6 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireAdmin(ctx, lang))) return;
     const arg = ctx.match?.toString().trim().toLowerCase();
     if (arg !== "button" && arg !== "math" && arg !== "rules") return ctx.reply(t(lang, "bot.captchatypeUsage"));
-    if (arg !== "rules" && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
     await updateGroupSettings(ctx.chat!.id, { captchaType: arg });
     await ctx.reply(t(lang, "bot.captchatypeSet", { type: arg }));
   });
@@ -334,7 +396,6 @@ export function registerCommands(bot: Bot): void {
     const arg = ctx.match?.toString().trim();
     const n = Number(arg);
     if (!arg || !Number.isInteger(n) || n < 30 || n > 600) return ctx.reply(t(lang, "bot.captchatimeoutUsage"));
-    if (!(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
     await updateGroupSettings(ctx.chat!.id, { captchaTimeoutSeconds: n });
     await ctx.reply(t(lang, "bot.captchatimeoutSet", { seconds: n }));
   });
@@ -345,7 +406,7 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireAdmin(ctx, lang))) return;
     const arg = ctx.match?.toString().trim().toLowerCase();
     if (arg !== "on" && arg !== "off") return ctx.reply(t(lang, "bot.antiraidUsage"));
-    if (arg === "on" && !(await requireProFeature(ctx, lang, ctx.chat!.id))) return;
+    // Antiraid is free for every group regardless of size (MONETIZATION.md §2 Phase 1).
     await updateGroupSettings(ctx.chat!.id, { antiraidEnabled: arg === "on" });
     await ctx.reply(t(lang, arg === "on" ? "bot.antiraidOn" : "bot.antiraidOff"));
   });
@@ -627,5 +688,49 @@ export function registerCommands(bot: Bot): void {
         }) +
         reactionLine
     );
+  });
+
+  // The other half of the appeal flow started by /start appeal_<chatId>
+  // (private-chat branch above) or /contact_admin's button. Explicitly
+  // passes through (`next()`) for every case that isn't "this exact private
+  // text is a pending appeal" — group messages in particular MUST reach the
+  // moderation handler registered after registerCommands() in bot.ts, so this
+  // can never silently swallow them.
+  bot.on("message:text", async (ctx, next) => {
+    if (ctx.chat.type !== "private" || !ctx.from) return next();
+    if (ctx.message.text.startsWith("/")) return next(); // let bot.command handlers match first
+    const chatId = await getPendingAppeal(ctx.from.id);
+    if (chatId === null) return next();
+
+    await clearPendingAppeal(ctx.from.id);
+    const group = await getGroupSettings(chatId);
+    const lang = group?.lang ?? detectLang(ctx.from.language_code);
+    if (!group) return ctx.reply(t(lang, "bot.appealGroupUnavailable"));
+
+    // Claims the cooldown atomically (SET NX) BEFORE writing the appeal, not
+    // after — two messages sent in quick succession (double-tap, duplicate
+    // webhook delivery) both racing past a separate isAppealOnCooldown read
+    // used to be able to both land as appeals. Only the caller that actually
+    // wins this claim proceeds; the loser sees the same cooldown reply an
+    // ordinary second-appeal attempt would.
+    if (!(await tryStartAppealCooldown(chatId, ctx.from.id))) {
+      return ctx.reply(t(lang, "bot.appealCooldown"));
+    }
+
+    // 2000 chars is generous for "why was I banned" / "please unban me" —
+    // caps a determined abuser's single message from ballooning the Mini App
+    // inbox card, not a real limit anyone hits by accident.
+    const text = ctx.message.text.slice(0, 2000);
+    await addAppeal({
+      id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+      chatId,
+      userId: ctx.from.id,
+      username: ctx.from.username ?? null,
+      displayName: displayName(ctx.from),
+      text,
+      createdAt: Date.now(),
+      status: "open",
+    });
+    await ctx.reply(t(lang, "bot.appealSent", { title: group.title }));
   });
 }

@@ -31,7 +31,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ groupId:
 
   // §15.6 B1: top-active-hours is the one Pro-gated card on this page, gated
   // with the same eligibility rule (Pro plan OR under the free-tier member
-  // grace) as captcha/antiraid and the group settings route.
+  // grace) as federation — captcha/antiraid are free for everyone now
+  // (MONETIZATION.md §2 Phase 1) and no longer share this gate.
   const memberCount = await getCachedMemberCount(getApi(), chatId);
   const topHoursEligible = canUseProFeature(settings, memberCount);
 

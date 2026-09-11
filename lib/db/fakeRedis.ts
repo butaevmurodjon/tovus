@@ -1,7 +1,8 @@
 // Minimal in-memory stand-in for the subset of the Upstash Redis client used
-// by lib/db/redis.ts's incrWithTtl and lib/moderation/flood.ts. For tests
-// only (see redis.test.ts / flood.test.ts) — not imported by any production
-// code.
+// by lib/db/redis.ts's incrWithTtl, lib/moderation/flood.ts, and the
+// date-bucketed hash counters in lib/db/stats.ts (hincrby/hgetall/expire).
+// For tests only (see redis.test.ts / flood.test.ts / stats' own reason-tag
+// tests) — not imported by any production code.
 //
 // Every method resolves via a real macrotask (setTimeout), so a client-side
 // sequence of two separate commands (e.g. GET then DEL) can interleave with
@@ -32,6 +33,11 @@ interface PipelineChain {
 export class FakeRedis {
   private store = new Map<string, number>();
   private ttls = new Map<string, number>();
+  // Separate from `store` rather than generalizing it — every existing method
+  // here assumes a plain number per key, and the hash counters (stats.ts) are
+  // a distinct value shape (one Map of field->count per key), not a value
+  // that belongs in the same map.
+  private hashes = new Map<string, Map<string, number>>();
   evalCallCount = 0;
 
   async get<T>(key: string): Promise<T | null> {
@@ -51,7 +57,8 @@ export class FakeRedis {
     return delayed(value);
   }
 
-  async set(key: string, value: number, opts?: { ex?: number }): Promise<"OK"> {
+  async set(key: string, value: number, opts?: { ex?: number; nx?: boolean }): Promise<"OK" | null> {
+    if (opts?.nx && this.store.has(key)) return delayed(null);
     this.store.set(key, value);
     if (opts?.ex) this.ttls.set(key, opts.ex);
     return delayed("OK");
@@ -59,6 +66,31 @@ export class FakeRedis {
 
   async exists(key: string): Promise<number> {
     return delayed(this.store.has(key) ? 1 : 0);
+  }
+
+  /** Hash-per-key counters (group:{chatId}:stats/reasontags/hourly:{date} in
+   * stats.ts). Real Upstash hincrby returns the field's new value. */
+  async hincrby(key: string, field: string, increment: number): Promise<number> {
+    const hash = this.hashes.get(key) ?? new Map<string, number>();
+    const next = (hash.get(field) ?? 0) + increment;
+    hash.set(field, next);
+    this.hashes.set(key, hash);
+    return delayed(next);
+  }
+
+  async hgetall<T>(key: string): Promise<T | null> {
+    const hash = this.hashes.get(key);
+    if (!hash) return delayed(null);
+    return delayed(Object.fromEntries(hash) as T);
+  }
+
+  /** Shared with the plain-key TTL map — a hash key and a plain key never
+   * collide in practice (distinct key prefixes per caller), so one `ttls`
+   * map for both is fine and keeps ttlOf() usable for hash-key assertions too. */
+  async expire(key: string, seconds: number): Promise<number> {
+    if (!this.store.has(key) && !this.hashes.has(key)) return delayed(0);
+    this.ttls.set(key, seconds);
+    return delayed(1);
   }
 
   /** Only the subset used by this repo's callers (markNewMember's two SETs):

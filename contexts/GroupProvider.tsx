@@ -11,7 +11,7 @@ type Status = "loading" | "ready" | "forbidden" | "error";
 interface GroupStatusFields {
   missingPermissions: string[];
   memberCount: number | null;
-  proFeaturesEligible: boolean;
+  federationEligible: boolean;
   /** For the §6.5 priority-5 overview card. Both come only from GET (PATCH
    * doesn't recompute them — no settings patch changes either), so they fall
    * back to the previous value below whenever a response omits them. Same
@@ -44,7 +44,7 @@ const GroupContext = createContext<GroupContextValue | null>(null);
 const EMPTY_STATUS: GroupStatusFields = {
   missingPermissions: [],
   memberCount: null,
-  proFeaturesEligible: true,
+  federationEligible: true,
   whitelistCount: 0,
   violationsToday: 0,
 };
@@ -71,7 +71,7 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
         setStatusFields({
           missingPermissions: data.missingPermissions ?? [],
           memberCount: data.memberCount ?? null,
-          proFeaturesEligible: data.proFeaturesEligible ?? true,
+          federationEligible: data.federationEligible ?? true,
           whitelistCount: data.whitelistCount ?? 0,
           violationsToday: data.violationsToday ?? 0,
         });
@@ -114,14 +114,14 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
             { settings: GroupSettings; rejected?: string[] } & Partial<GroupStatusFields>
           >(`/api/miniapp/groups/${chatId}`, { method: "PATCH", body: JSON.stringify(patch) });
           rejected = data.rejected ?? [];
-          // PATCH returns memberCount + proFeaturesEligible but not
+          // PATCH returns memberCount + federationEligible but not
           // missingPermissions (that needs uncached getBotPermissions calls not
           // worth paying per toggle) — keep the prior value for any field the
           // response omits instead of wiping it until the next full refresh.
           setStatusFields((prev) => ({
             missingPermissions: data.missingPermissions ?? prev.missingPermissions,
             memberCount: data.memberCount ?? prev.memberCount,
-            proFeaturesEligible: data.proFeaturesEligible ?? prev.proFeaturesEligible,
+            federationEligible: data.federationEligible ?? prev.federationEligible,
             whitelistCount: data.whitelistCount ?? prev.whitelistCount,
             violationsToday: data.violationsToday ?? prev.violationsToday,
           }));

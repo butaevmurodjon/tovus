@@ -20,16 +20,17 @@ import {
 } from "@/lib/db/referrals";
 import { maybeRewardReferrer, REFERRAL_MIN_MEMBERS } from "./referrals";
 import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } from "@/lib/db/admins";
-import { incrementActivity, incrementHourlyActivity, incrementStat } from "@/lib/db/stats";
+import { incrementActivity, incrementHourlyActivity, incrementReasonTag, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { isGloballyBanned } from "@/lib/db/globalBan";
 import { getCachedMessage, getLastMessageId, recordMessage } from "@/lib/db/messageAuthors";
-import { canUseProFeature, formatPlanDate } from "@/lib/billing/plan";
+import { formatPlanDate } from "@/lib/billing/plan";
 import { moderateMessage } from "@/lib/moderation";
 import { checkRaid, markNewMember } from "@/lib/moderation/flood";
 import { isCasBanned } from "@/lib/moderation/cas";
 import { markNewMemberRestricted } from "@/lib/moderation/newMemberGuard";
 import { isLikelyAdminImpersonation } from "@/lib/moderation/impersonation";
+import { detectBadProfileSignal } from "@/lib/moderation/profileSignals";
 import { recordReputationHit } from "@/lib/moderation/reputation";
 import { runShadowScoring } from "@/lib/moderation/scoring";
 import { collectModerationSample, recordAdminLabel } from "@/lib/moderation/corpusCollector";
@@ -42,7 +43,8 @@ import { applyViolation } from "./violations";
 import { startCaptcha, sweepExpiredCaptchas, verifyCaptcha } from "./captcha";
 import { castVote, clearVoteBan, getVoteBanMessageId, liftSanction } from "./voteban";
 import { sendWelcomeMessage } from "./welcome";
-import { activateProPlan, parseProPayload } from "./payments";
+import { activateProPlan, parseProPayload, parseUnbanPayload } from "./payments";
+import { setAppealStatus } from "@/lib/db/appeals";
 import { displayName } from "./format";
 
 let _bot: Bot | null = null;
@@ -249,13 +251,19 @@ export function getBot(): Bot {
 
     if (await isGloballyBanned(user.id)) {
       await ctx.declineChatJoinRequest(user.id).catch(() => {});
-      await incrementStat(chat.id, "spam").catch(() => {});
+      await Promise.all([
+        incrementStat(chat.id, "spam").catch(() => {}),
+        incrementReasonTag(chat.id, "globalban").catch(() => {}),
+      ]);
       return;
     }
 
     if (settings.casCheckEnabled && (await isCasBanned(user.id))) {
       await ctx.declineChatJoinRequest(user.id).catch(() => {});
-      await incrementStat(chat.id, "spam").catch(() => {});
+      await Promise.all([
+        incrementStat(chat.id, "spam").catch(() => {}),
+        incrementReasonTag(chat.id, "cas").catch(() => {}),
+      ]);
     }
   });
 
@@ -362,6 +370,38 @@ export function getBot(): Bot {
   // confirmation happened to arrive — see createUpgradeInvoiceLink.
   bot.on("message:successful_payment", async (ctx) => {
     const payment = ctx.message.successful_payment;
+
+    // Paid unban (see payments.ts) — checked first since its payload prefix
+    // is distinct from `pro:` and never falls through to the Pro-activation
+    // branch below. Telegram already took the Stars regardless of what
+    // happens next below — the unbanChatMember result is checked explicitly
+    // (not just best-effort) so a payer who was charged but NOT actually
+    // unbanned (bot lost ban rights, chat gone, etc.) is never told the
+    // opposite, and the appeal surfaces as needing a human, not "resolved".
+    const unban = parseUnbanPayload(payment.invoice_payload);
+    if (unban) {
+      const settings = await getGroupSettings(unban.chatId);
+      const lang = settings?.lang ?? "ru";
+      const title = settings?.title ?? "";
+      const unbanned = await ctx.api
+        .unbanChatMember(unban.chatId, unban.userId, { only_if_banned: true })
+        .catch(() => false);
+      if (unbanned) {
+        await setAppealStatus(unban.chatId, unban.appealId, "resolved").catch(() => {});
+        await ctx.reply(t(lang, "bot.unbanPaymentThanks", { title })).catch(() => {});
+      } else {
+        await setAppealStatus(unban.chatId, unban.appealId, "payment_failed").catch(() => {});
+        await ctx.reply(t(lang, "bot.unbanPaymentFailed", { title })).catch(() => {});
+        // Best-effort heads-up in the group itself — the appeal card also
+        // shows "payment_failed" durably in the Mini App next time an admin
+        // opens it, so this isn't the only signal, just the faster one.
+        await ctx.api
+          .sendMessage(unban.chatId, t(lang, "bot.unbanPaymentFailedAdminNotice", { user: unban.userId }))
+          .catch(() => {});
+      }
+      return;
+    }
+
     const targetChatId = parseProPayload(payment.invoice_payload) ?? ctx.chat.id;
     const expiresAtMs = payment.subscription_expiration_date
       ? payment.subscription_expiration_date * 1000
@@ -396,8 +436,6 @@ export function getBot(): Bot {
       const newMembers = message.new_chat_members.filter((member) => !member.is_bot);
       await Promise.all(newMembers.map((member) => markNewMember(chat.id, member.id)));
       if (settings) {
-        const memberCount = await getCachedMemberCount(ctx.api, chat.id);
-        const eligible = canUseProFeature(settings, memberCount);
         await Promise.all(
           newMembers.map(async (member) => {
             // Owner-issued global ban, checked before anything else (even CAS):
@@ -406,7 +444,12 @@ export function getBot(): Bot {
             // never opt-out for a group the bot manages.
             if (await isGloballyBanned(member.id)) {
               const banned = await ctx.api.banChatMember(chat.id, member.id).catch(() => false);
-              if (banned) await incrementStat(chat.id, "spam").catch(() => {});
+              if (banned) {
+                await Promise.all([
+                  incrementStat(chat.id, "spam").catch(() => {}),
+                  incrementReasonTag(chat.id, "globalban").catch(() => {}),
+                ]);
+              }
               return;
             }
 
@@ -420,10 +463,13 @@ export function getBot(): Bot {
             if (settings.casCheckEnabled && (await isCasBanned(member.id))) {
               const banned = await ctx.api.banChatMember(chat.id, member.id).catch(() => false);
               if (banned) {
-                await incrementStat(chat.id, "spam").catch(() => {});
-                await ctx.api
-                  .sendMessage(chat.id, t(settings.lang, "bot.casBanned", { user: displayName(member) }))
-                  .catch(() => {});
+                await Promise.all([
+                  incrementStat(chat.id, "spam").catch(() => {}),
+                  incrementReasonTag(chat.id, "cas").catch(() => {}),
+                  ctx.api
+                    .sendMessage(chat.id, t(settings.lang, "bot.casBanned", { user: displayName(member) }))
+                    .catch(() => {}),
+                ]);
               }
               return;
             }
@@ -433,12 +479,17 @@ export function getBot(): Bot {
             if (settings.restrictNewMembersEnabled) {
               await markNewMemberRestricted(chat.id, member.id, settings.restrictNewMembersMinutes).catch(() => {});
             }
-            // antiraidAuto defaults true — raid detection runs for any eligible
-            // group even if the admin never touched the manual toggle. It's
-            // still the SAME single checkRaid() call either way, just gated by
-            // a broader condition, not a second independent check.
+            // antiraidAuto defaults true — raid detection runs for every group
+            // even if the admin never touched the manual toggle. Free for all
+            // group sizes/plans (MONETIZATION.md §2 Phase 1) — no eligibility
+            // check any more, just the SAME single checkRaid() call.
             const antiraidActive = settings.antiraidEnabled || settings.antiraidAuto;
-            const isRaid = antiraidActive && eligible ? await checkRaid(chat.id) : false;
+            const isRaid = antiraidActive ? await checkRaid(chat.id) : false;
+            // Raid detection never bans by itself (forces captcha verification
+            // instead, see `forced` below) — this tags the *event* for the
+            // monthly digest ("N рейд-атак отражено"), not a removal/ban count
+            // the way the other incrementReasonTag calls in this file are.
+            if (isRaid) await incrementReasonTag(chat.id, "raid").catch(() => {});
 
             // §15.2(a): name/username close enough to an existing admin's to be a
             // phishing setup. Never a ban (homonyms happen) — just forces
@@ -470,14 +521,23 @@ export function getBot(): Bot {
               await recordReputationHit(chat.id, member.id).catch(() => {});
             }
 
-            // "rules" is a free type (§15.3) — doesn't need `eligible` the way
-            // button/math do. A raid, impersonation, or network-join match
-            // forces VERIFICATION specifically (proving non-bot-ness), so it
-            // always uses "button" even when the group's configured type is
-            // "rules" — an "I agree to the rules" click doesn't prove that.
-            const captchaGateEligible = settings.captchaType === "rules" || eligible;
-            const forced = isRaid || isImpersonator || isNetworkJoin;
-            if ((settings.captchaEnabled && captchaGateEligible) || forced) {
+            // Obscene/scam-looking name, last name, or @username — see
+            // profileSignals.ts for why this is text-only (no avatar-photo
+            // check). Same soft treatment as isImpersonator above: never a
+            // punishment by itself, just forces verification + a journal note.
+            const badProfile = detectBadProfileSignal(member);
+            if (badProfile) {
+              await logJoinSignal(chat.id, message, member, badProfile);
+            }
+
+            // Captcha is free for every group/type (MONETIZATION.md §2 Phase 1),
+            // so no eligibility gate here any more. A raid, impersonation,
+            // bad-profile, or network-join match forces VERIFICATION
+            // specifically (proving non-bot-ness), so it always uses "button"
+            // even when the group's configured type is "rules" — an "I agree
+            // to the rules" click doesn't prove that.
+            const forced = isRaid || isImpersonator || Boolean(badProfile) || isNetworkJoin;
+            if (settings.captchaEnabled || forced) {
               await startCaptcha(ctx.api, chat.id, member, settings.lang, {
                 type: forced && settings.captchaType === "rules" ? "button" : settings.captchaType,
                 timeoutSeconds: settings.captchaTimeoutSeconds,

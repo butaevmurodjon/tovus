@@ -4,6 +4,25 @@ export type ViolationAction = "delete" | "warn" | "mute" | "ban";
 
 export type ViolationCategory = "profanity" | "spam" | "premium";
 
+/** Finer-grained breakdown of *why* a violation fired, additive to (never a
+ * replacement for) ViolationCategory — a monthly digest saying "12 удалено"
+ * is much less useful than "8 реклама, 3 скам, 1 опасный файл", but the
+ * existing category buckets stay exactly as coarse as today/7d/30d and the
+ * owner overview already expect. See lib/moderation/reasonTags.ts for how a
+ * verdict maps down to one of these. */
+export type ReasonTag =
+  | "profanity"
+  | "scam"
+  | "apk"
+  | "phishing_link"
+  | "ads"
+  | "ai"
+  | "flood"
+  | "cas"
+  | "raid"
+  | "globalban"
+  | "other";
+
 export type PlanTier = "free" | "pro";
 
 export type CaptchaType = "button" | "math" | "rules";
@@ -99,6 +118,14 @@ export interface GroupSettings {
    * reads lib/db/referrals.ts, never this field, so a wrong value here can't
    * grant anyone anything. */
   referredBy: number | null;
+  /** Free for everyone, on by default (see MONTHLYDIGEST scope decision) —
+   * a monthly "what got removed" summary posted at the group's own best hour. */
+  monthlyDigestEnabled: boolean;
+  /** "YYYY-MM" (UTC) of the last month a digest was actually sent, or null.
+   * The idempotency guard for the hourly cron: without it, a group whose
+   * digest hour/day match would get re-sent every hour for the rest of that
+   * hour's minute-0 window, and again on any redeploy/retry within the month. */
+  lastDigestSentMonth: string | null;
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -135,6 +162,8 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   planExpiresAt: null,
   attributionEnabled: true,
   referredBy: null,
+  monthlyDigestEnabled: true,
+  lastDigestSentMonth: null,
 };
 
 export interface JournalEntry {
@@ -169,6 +198,39 @@ export interface JournalEntry {
   /** Which `moderateMessage` detector produced the verdict: "spam-detector",
    * "profanity", "flood", "premium-ai", "restricted-content", "night-mode". */
   source?: string | null;
+}
+
+/**
+ * A message a member sent to the bot in private, asking to reach the group's
+ * admin(s) — the "Написать администратору" flow (see lib/db/appeals.ts,
+ * lib/telegram/commands.ts). Never causes an action by itself; an admin
+ * reviews it in the Mini App and acts (unban, or just dismiss) by hand.
+ */
+export interface AppealEntry {
+  id: string;
+  chatId: number;
+  userId: number;
+  username: string | null;
+  displayName: string;
+  text: string;
+  createdAt: number;
+  /**
+   * "offer_sent": an admin priced a paid unban and the Stars invoice was
+   * delivered to the appellant's private chat — still open until they pay
+   * (→ "resolved", lib/telegram/bot.ts successful_payment) or an admin
+   * dismisses it directly.
+   * "payment_failed": the Stars payment succeeded but `unbanChatMember`
+   * itself failed (bot lost ban rights, chat gone, etc.) — Telegram already
+   * took the payer's money, so this MUST surface distinctly in the Mini App
+   * rather than silently reading as "resolved" when the user is still
+   * banned. Needs a human to sort out manually.
+   */
+  status: "open" | "offer_sent" | "resolved" | "dismissed" | "payment_failed";
+  /** Set when an admin offers a paid unban (§ "Предложить платный разбан").
+   * Never set by the bot itself — always a specific admin's per-case price,
+   * never a default the bot suggests. */
+  offerStars?: number;
+  offeredAt?: number;
 }
 
 export interface StatsBucket {

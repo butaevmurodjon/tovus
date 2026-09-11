@@ -2,22 +2,57 @@ import type { GroupSettings } from "@/lib/db/types";
 import { t, type Lang } from "@/lib/i18n";
 
 /**
- * Combot's own public free tier is "free under 200 members" — we use that as
- * our reference anchor rather than inventing a number from nothing. Below this,
- * a group gets Pro-tier perks (captcha, antiraid) for free as a grace/trial;
- * above it, the group needs an active subscription.
+ * MONETIZATION.md §2/§5 Phase 1: captcha and antiraid are Free for every group
+ * regardless of size now (Rose gives them away too — paywalling them lost the
+ * "what do I even pay for" comparison). This threshold survives only for the
+ * features still gated PRO with no size carve-out in the tariff table —
+ * `federationEnabled` and the active-hours analytics — as the pre-existing
+ * small-group grace: a group at or under this size gets those free too, same
+ * as before the re-cut. Combot's own public free tier ("free under 200
+ * members") is the reference anchor.
  */
 export const FREE_TIER_MAX_MEMBERS = 200;
 
 /**
- * ~$5/mo at typical Telegram Stars pricing — the same monthly anchor Combot
- * charges. Stars-to-USD varies by region/purchase tier and Telegram/store cuts,
- * so this is an approximate anchor, not a precise conversion — adjust freely.
+ * MONETIZATION.md §5 Phase 1 re-cut, cheaper ladder (owner decision
+ * 2026-09-11): PRO dropped from 349 to 199 ⭐/mo to stop losing impulse buys to
+ * Group Help/ChatKeeper. Stars-to-USD varies by region/purchase tier and
+ * Telegram/store cuts, so this is an approximate anchor, not a precise
+ * conversion — adjust freely.
  */
-export const PRO_PRICE_STARS = 349;
+export const PRO_PRICE_STARS = 199;
+
+/**
+ * PRO Lite — one-time unlock (no `subscription_period`), MONETIZATION.md §2.
+ * Not yet wired to a purchase flow (Phase 2); constant reserved so the number
+ * lives in one place once that invoice ships.
+ */
+export const PRO_LITE_PRICE_STARS = 129;
+
+/**
+ * PRO annual — one-time invoice (Stars subscriptions only support a 30-day
+ * period, so a year is a plain one-off purchase, not a recurring one),
+ * MONETIZATION.md §2/§5. ~17% cheaper than 12× the monthly price. Not yet
+ * wired to a purchase flow (Phase 2).
+ */
+export const PRO_YEAR_PRICE_STARS = 1990;
+
+/** Agency/white-label clone, one-time. Not yet wired to a purchase flow (Phase 4). */
+export const WHITE_LABEL_PRICE_STARS = 500;
 
 /** The only value the Bot API currently accepts for an XTR subscription_period. */
 export const PRO_SUBSCRIPTION_PERIOD_SECONDS = 2592000; // 30 days
+
+/**
+ * Bounds for the per-case price an admin sets on a paid unban (2026-09-12
+ * "написать администратору" follow-up) — kept here, not in
+ * lib/telegram/payments.ts, so the Mini App page (client-side, must not pull
+ * in server-only Redis/grammy code) can import them directly.
+ * `MAX_UNBAN_PRICE_STARS` is Telegram's own documented cap for a single Stars
+ * (XTR) invoice's total price — createInvoiceLink rejects anything above it.
+ */
+export const MIN_UNBAN_PRICE_STARS = 1;
+export const MAX_UNBAN_PRICE_STARS = 2500;
 
 type PlanFields = Pick<GroupSettings, "plan" | "planExpiresAt">;
 
@@ -40,8 +75,11 @@ export function requiresProForSize(memberCount: number | null): boolean {
 }
 
 /**
- * Eligibility for Pro-only *features* (captcha, antiraid): either an active paid
- * subscription, or small enough to fall under the free-grace member threshold.
+ * Eligibility for the remaining size-gated Pro-only *features* — federation
+ * (ban-list sharing) and active-hours analytics, per MONETIZATION.md §2. Either
+ * an active paid subscription, or small enough to fall under the free-grace
+ * member threshold. Captcha and antiraid are no longer gated by this (Phase 1
+ * re-cut) — they're unconditionally Free, see bot.ts/commands.ts.
  * Not used for DeepSeek quota routing — that's `isProActive` alone, see deepseek.ts.
  */
 export function canUseProFeature(settings: PlanFields, memberCount: number | null): boolean {

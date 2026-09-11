@@ -45,7 +45,7 @@ export default function GroupSettingsPage() {
   const {
     settings,
     missingPermissions,
-    proFeaturesEligible,
+    federationEligible,
     whitelistCount,
     violationsToday,
     updateSettings,
@@ -532,6 +532,16 @@ export default function GroupSettingsPage() {
           <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
             {t("miniapp.deleteNoticeHint")}
           </p>
+          <Divider />
+          <Row label={t("miniapp.monthlyDigestTitle")}>
+            <Toggle
+              checked={settings.monthlyDigestEnabled}
+              onChange={(v) => setField("monthlyDigestEnabled", v)}
+            />
+          </Row>
+          <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
+            {t("miniapp.monthlyDigestHint")}
+          </p>
           {/* The attribution button is suppressed outright for active-Pro
               groups (see notifyChat), so showing a toggle that changes nothing
               there would just be misleading — hidden rather than disabled. */}
@@ -686,23 +696,12 @@ export default function GroupSettingsPage() {
       <Card>
         <CardSection>
           <Collapsible title={t("miniapp.advancedSection")}>
-            <Row
-              label={
-                <span className="flex items-center gap-1.5">
-                  {t("miniapp.captchaTitle")}
-                  {!proFeaturesEligible && <Badge variant="warning">PRO</Badge>}
-                </span>
-              }
-            >
+            <Row label={t("miniapp.captchaTitle")}>
               <Toggle checked={settings.captchaEnabled} onChange={(v) => toggleProFeature("captchaEnabled", v)} />
             </Row>
-            <ProFeatureHint
-              eligible={proFeaturesEligible}
-              enabled={settings.captchaEnabled}
-              normalHint={t("miniapp.captchaHint")}
-              t={t}
-              className="mb-3"
-            />
+            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.captchaHint")}
+            </p>
             {settings.captchaEnabled && (
               <>
                 <div className="mb-3">
@@ -753,29 +752,18 @@ export default function GroupSettingsPage() {
               </>
             )}
             <Divider />
-            <Row
-              label={
-                <span className="flex items-center gap-1.5">
-                  {t("miniapp.antiraidTitle")}
-                  {!proFeaturesEligible && <Badge variant="warning">PRO</Badge>}
-                </span>
-              }
-            >
+            <Row label={t("miniapp.antiraidTitle")}>
               <Toggle checked={settings.antiraidEnabled} onChange={(v) => toggleProFeature("antiraidEnabled", v)} />
             </Row>
-            <ProFeatureHint
-              eligible={proFeaturesEligible}
-              enabled={settings.antiraidEnabled}
-              normalHint={t("miniapp.antiraidHint")}
-              t={t}
-              className="mb-3"
-            />
+            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.antiraidHint")}
+            </p>
             <Divider />
             <Row
               label={
                 <span className="flex items-center gap-1.5">
                   {t("miniapp.federationTitle")}
-                  {!proFeaturesEligible && <Badge variant="warning">PRO</Badge>}
+                  {!federationEligible && <Badge variant="warning">PRO</Badge>}
                 </span>
               }
             >
@@ -785,7 +773,7 @@ export default function GroupSettingsPage() {
               />
             </Row>
             <ProFeatureHint
-              eligible={proFeaturesEligible}
+              eligible={federationEligible}
               enabled={settings.federationEnabled}
               normalHint={t("miniapp.federationHint")}
               t={t}

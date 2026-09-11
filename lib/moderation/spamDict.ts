@@ -145,6 +145,47 @@ export const SCAM_PATTERNS: string[] = [
 ];
 
 /**
+ * Substring markers checked against a *joining member's* display name +
+ * username (not message text — see lib/moderation/profileSignals.ts). Unlike
+ * SCAM_PATTERNS above, these never delete or ban on their own: a name-only
+ * match only forces the same "prove you're not a bot" captcha verification
+ * as a raid/impersonation match (§15.2a/§15.7 precedent — "homonyms happen",
+ * a name is weak evidence by itself). Two categories in one list:
+ * pay-to-DM/earn-fast bait (the classic scam-account bio) and explicit sexual
+ * solicitation (the "girl profile pic + paid content" spam-account pattern).
+ * Kept to unambiguous bio vocabulary — ordinary words that happen to overlap
+ * with a real name/profession ("crypto", "money", "работа") are deliberately
+ * NOT here, since a false hit only costs an extra captcha but a noisy list
+ * would force-verify real newcomers constantly.
+ */
+export const SCAM_PROFILE_MARKERS: string[] = [
+  // earn-fast / pay-to-DM bait, ru + uz-cyrl.
+  "заработок от",
+  "заработок за день",
+  "пассивный доход",
+  "инвестиции от",
+  "трейдер | сигналы",
+  "крипто сигналы",
+  "пишите в директ",
+  "пишите в лс для",
+  "куратор проекта",
+  "менеджер по работе",
+  "фарм звёзд",
+  "продажа звёзд",
+  "дан топинг",
+  "даромад",
+  // explicit sexual solicitation / paid-content bait.
+  "интим услуги",
+  "интим за донат",
+  "вебкам модель",
+  "onlyfans",
+  "only fans",
+  "платный контент 18",
+  "приватные фото",
+  "секс знакомства",
+];
+
+/**
  * File extensions almost never legitimate in a public/business group chat and
  * heavily used for malware/spyware distribution in the region — fake "official
  * bank/gov app" .apk installers are the single most common scam-file vector here.

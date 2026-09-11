@@ -6,7 +6,8 @@ import type { GroupSettings, ViolationAction } from "@/lib/db/types";
 import type { Lang } from "@/lib/i18n";
 import type { ModerationVerdict } from "@/lib/moderation";
 import { addJournalEntry } from "@/lib/db/journal";
-import { incrementStat } from "@/lib/db/stats";
+import { incrementReasonTag, incrementStat } from "@/lib/db/stats";
+import { classifyReasonTag } from "@/lib/moderation/reasonTags";
 import { recordReactionTime, type ReactionPath } from "@/lib/db/reactionStats";
 import { clearPendingNotice, getPendingNotice, setPendingNotice } from "@/lib/db/autoNotice";
 import { t } from "@/lib/i18n";
@@ -16,7 +17,7 @@ import { clearWarns, recordWarn } from "@/lib/moderation/warns";
 import { collectSpamSignals, countedSignals, scoreSignals } from "@/lib/moderation/scoring";
 import { getAllowlist } from "@/lib/db/allowlist";
 import { isProActive } from "@/lib/billing/plan";
-import { addToGroupUrl } from "./commands";
+import { addToGroupUrl, appealUrl } from "./commands";
 import { startVoteBan } from "./voteban";
 
 /** Best-effort limit for the visible (wall-clock) reaction sample — matches
@@ -103,6 +104,9 @@ export async function applyViolation(
   await Promise.all([
     logToJournal(chatId, message, user, verdict, effectiveAction, text, escalated),
     incrementStat(chatId, verdict.category),
+    // Monthly-digest breakdown (lib/telegram/monthlyDigest.ts) — the ONE call
+    // site with a full verdict (source + reason), see reasonTags.ts.
+    incrementReasonTag(chatId, classifyReasonTag(verdict.source, verdict.reason, verdict.category)),
     settings.logChannelId
       ? forwardToLogChannel(api, settings.logChannelId, chatId, user, verdict, effectiveAction, text).catch(() => {})
       : Promise.resolve(),
@@ -270,7 +274,7 @@ async function notifyChat(
       t(lang, "bot.mutedUser", { user: mention, reason: verdict.reason }) + escalationSuffix + reaction,
       {
         parse_mode: "HTML",
-        reply_markup: withAttribution(
+        reply_markup: withExtraRows(
           voteBanKeyboard(lang, chatId, user.id, settings.voteBanThreshold),
           attributionRow
         ),
@@ -285,13 +289,18 @@ async function notifyChat(
     // A federated ban is a cross-group decision (see propagateBan below) — a
     // single group's local vote must never be able to undo that, so no button.
     const voteEligible = !settings.federationEnabled;
+    // A URL button, not a chat action — works even though the person it's
+    // for was just removed from this chat (see appealUrl/commands.ts).
+    const appealLink = appealUrl(chatId);
+    const appealRow = appealLink ? [{ text: t(lang, "bot.appealButton"), url: appealLink }] : null;
     const sent = await api.sendMessage(
       chatId,
       t(lang, "bot.bannedUser", { user: mention, reason: verdict.reason }) + escalationSuffix + reaction,
       {
         parse_mode: "HTML",
-        reply_markup: withAttribution(
+        reply_markup: withExtraRows(
           voteEligible ? voteBanKeyboard(lang, chatId, user.id, settings.voteBanThreshold) : undefined,
+          appealRow,
           attributionRow
         ),
       }
@@ -300,15 +309,15 @@ async function notifyChat(
   }
 }
 
-/** Appends the attribution button as an EXTRA row — it never replaces the
- * vote-ban button. Returns undefined (not an empty keyboard, which Telegram
- * rejects) when there's nothing to show at all: a federated ban with
- * attribution off has neither row. */
-function withAttribution(
+/** Appends each extra row (attribution, appeal, …) after `base` — never
+ * replaces the vote-ban button. Returns undefined (not an empty keyboard,
+ * which Telegram rejects) when there's nothing to show at all: a federated
+ * ban with attribution off and no appeal link has none of the rows. */
+function withExtraRows(
   base: InlineKeyboardMarkup | undefined,
-  attributionRow: { text: string; url: string }[] | null
+  ...extraRows: ({ text: string; url: string }[] | null)[]
 ): InlineKeyboardMarkup | undefined {
-  const rows = [...(base?.inline_keyboard ?? []), ...(attributionRow ? [attributionRow] : [])];
+  const rows = [...(base?.inline_keyboard ?? []), ...extraRows.filter((r): r is { text: string; url: string }[] => r !== null)];
   return rows.length > 0 ? { inline_keyboard: rows } : undefined;
 }
 

@@ -13,7 +13,8 @@ import { haptic, hapticNotify, confirmAction } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
 import { optimisticUpdate } from "@/lib/miniapp/optimistic";
 import { PRESETS, PRESET_KEYS, type PresetKey } from "@/lib/moderation/presets";
-import type { JournalEntry } from "@/lib/db/types";
+import { MAX_UNBAN_PRICE_STARS as MAX_UNBAN_STARS, MIN_UNBAN_PRICE_STARS as MIN_UNBAN_STARS } from "@/lib/billing/plan";
+import type { AppealEntry, JournalEntry } from "@/lib/db/types";
 
 const PRESET_LABEL_KEY: Record<PresetKey, string> = {
   agro: "miniapp.presetAgro",
@@ -22,7 +23,7 @@ const PRESET_LABEL_KEY: Record<PresetKey, string> = {
   finance: "miniapp.presetFinance",
 };
 
-type Tab = "journal" | "whitelist" | "words";
+type Tab = "journal" | "appeals" | "whitelist" | "words";
 type T = (key: string, params?: Record<string, string | number>) => string;
 
 export default function GroupJournalPage() {
@@ -48,14 +49,16 @@ export default function GroupJournalPage() {
       <SegmentedControl<Tab>
         value={tab}
         onChange={setTab}
-        columns={3}
+        columns={4}
         options={[
           { value: "journal", label: t("miniapp.tabJournal") },
+          { value: "appeals", label: t("miniapp.tabAppeals") },
           { value: "whitelist", label: t("miniapp.tabWhitelist") },
           { value: "words", label: t("miniapp.tabWordFilter") },
         ]}
       />
       {tab === "journal" && <JournalTab t={t} fetcher={fetcher} isOwner={isOwner} flash={flash} />}
+      {tab === "appeals" && <AppealsTab t={t} fetcher={fetcher} flash={flash} />}
       {tab === "whitelist" && <WhitelistTab t={t} flash={flash} />}
       {tab === "words" && (
         <>
@@ -201,6 +204,173 @@ function JournalTab({
           trusting={trustingId === entry.id}
         />
       ))}
+    </div>
+  );
+}
+
+const APPEAL_STATUS_KEY: Record<AppealEntry["status"], string> = {
+  open: "miniapp.appealStatusOpen",
+  offer_sent: "miniapp.appealStatusOfferSent",
+  resolved: "miniapp.appealStatusResolved",
+  dismissed: "miniapp.appealStatusDismissed",
+  payment_failed: "miniapp.appealStatusPaymentFailed",
+};
+
+/**
+ * "Написать администратору" inbox (MONETIZATION.md-adjacent 2026-09-12
+ * change) — messages members sent the bot in private after tapping the
+ * appeal button on a ban notice or /contact_admin. Three actions: free
+ * "Разбанить", "Отклонить", or price a paid unban — there is no auto-punish
+ * path here, matching the "never act on this alone" rule the underlying flow
+ * already follows. The paid-unban price box carries its own disclaimer
+ * (miniapp.appealOfferDisclaimer) because the Stars land on the BOT's own
+ * balance, not the admin's — see payments.ts's comment on this.
+ */
+function AppealsTab({
+  t,
+  fetcher,
+  flash,
+}: {
+  t: T;
+  fetcher: <R>(path: string, options?: RequestInit) => Promise<R>;
+  flash: (message: string) => void;
+}) {
+  const { chatId } = useGroup();
+  const [entries, setEntries] = useState<AppealEntry[] | null>(null);
+  const [error, setError] = useState(false);
+  const [actingId, setActingId] = useState<string | null>(null);
+  const [offerInputs, setOfferInputs] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    fetcher<{ entries: AppealEntry[] }>(`/api/miniapp/groups/${chatId}/appeals`)
+      .then((d) => !cancelled && setEntries(d.entries))
+      .catch(() => !cancelled && setError(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [chatId, fetcher]);
+
+  async function act(entry: AppealEntry, action: "unban" | "dismiss" | "offer_paid_unban", amountStars?: number) {
+    if (action === "unban") {
+      const confirmed = await confirmAction(t("miniapp.appealUnbanConfirm", { name: entry.displayName }));
+      if (!confirmed) return;
+    }
+    if (action === "offer_paid_unban") {
+      const confirmed = await confirmAction(
+        t("miniapp.appealOfferConfirm", { name: entry.displayName, amount: amountStars ?? 0 })
+      );
+      if (!confirmed) return;
+    }
+    haptic("medium");
+    setActingId(entry.id);
+    try {
+      const data = await fetcher<{ entry: AppealEntry }>(`/api/miniapp/groups/${chatId}/appeals/${entry.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action, amountStars }),
+      });
+      setEntries((cur) => cur?.map((e) => (e.id === entry.id ? data.entry : e)) ?? cur);
+      hapticNotify("success");
+      if (action === "unban") flash(t("miniapp.appealUnbanned"));
+      if (action === "offer_paid_unban") flash(t("miniapp.appealOfferSent"));
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    } finally {
+      setActingId(null);
+    }
+  }
+
+  function offerAmount(entryId: string): number | null {
+    const raw = Number(offerInputs[entryId]);
+    return Number.isInteger(raw) && raw >= MIN_UNBAN_STARS && raw <= MAX_UNBAN_STARS ? raw : null;
+  }
+
+  if (error) return <StatusScreen title={t("miniapp.connectionError")} />;
+  if (!entries) return <StatusScreen title={t("common.loading")} />;
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {entries.length === 0 && (
+        <p className="text-[13px] text-center py-12" style={{ color: "var(--ink-muted)" }}>
+          {t("miniapp.appealsEmpty")}
+        </p>
+      )}
+      {entries.map((entry) => {
+        // "payment_failed": the appellant already paid but unbanChatMember
+        // itself failed — offer_paid_unban must never show again here (see
+        // the route's "already_paid" guard), only retry-unban/dismiss.
+        const canOfferPaid = entry.status === "open" || entry.status === "offer_sent";
+        const actionable = canOfferPaid || entry.status === "payment_failed";
+        const amount = offerAmount(entry.id);
+        return (
+          <Card key={entry.id}>
+            <CardSection>
+              <div className="flex items-start justify-between gap-2 mb-1.5">
+                <span className="text-[13px] font-medium min-w-0 break-all">
+                  {entry.username ? `@${entry.username}` : entry.displayName} · id{entry.userId}
+                </span>
+                <Badge variant={actionable ? "warning" : "neutral"}>{t(APPEAL_STATUS_KEY[entry.status])}</Badge>
+              </div>
+              <p className="text-[13px] mb-2 whitespace-pre-wrap break-words" style={{ color: "var(--ink)" }}>
+                {entry.text}
+              </p>
+              <p className="text-[11px] mb-2" style={{ color: "var(--ink-muted)" }}>
+                {new Date(entry.createdAt).toLocaleString()}
+              </p>
+              {entry.status === "offer_sent" && entry.offerStars && (
+                <p className="text-[12px] mb-2" style={{ color: "var(--ink-muted)" }}>
+                  {t("miniapp.appealOfferPending", { amount: entry.offerStars })}
+                </p>
+              )}
+              {entry.status === "payment_failed" && (
+                <p className="text-[12px] mb-2" style={{ color: "#a3401f" }}>
+                  {t("miniapp.appealPaymentFailedHint", { amount: entry.offerStars ?? 0 })}
+                </p>
+              )}
+              {actionable && (
+                <>
+                  <div className="flex gap-2 mb-2">
+                    <Button variant="primary" onClick={() => act(entry, "unban")} disabled={actingId === entry.id}>
+                      {t("miniapp.appealUnbanAction")}
+                    </Button>
+                    <Button variant="secondary" onClick={() => act(entry, "dismiss")} disabled={actingId === entry.id}>
+                      {t("miniapp.appealDismissAction")}
+                    </Button>
+                  </div>
+                  {canOfferPaid && (
+                    <>
+                      <p className="text-[11px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
+                        {t("miniapp.appealOfferDisclaimer")}
+                      </p>
+                      <div className="flex gap-2">
+                        <input
+                          value={offerInputs[entry.id] ?? ""}
+                          onChange={(e) => setOfferInputs((cur) => ({ ...cur, [entry.id]: e.target.value }))}
+                          placeholder={t("miniapp.appealOfferPlaceholder", {
+                            min: MIN_UNBAN_STARS,
+                            max: MAX_UNBAN_STARS,
+                          })}
+                          inputMode="numeric"
+                          className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+                          style={{ borderColor: "var(--border-strong)" }}
+                        />
+                        <Button
+                          variant="secondary"
+                          onClick={() => amount !== null && act(entry, "offer_paid_unban", amount)}
+                          disabled={actingId === entry.id || amount === null}
+                        >
+                          {t("miniapp.appealOfferAction")}
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </CardSection>
+          </Card>
+        );
+      })}
     </div>
   );
 }

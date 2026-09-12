@@ -314,6 +314,7 @@ export function registerCommands(bot: Bot): void {
       | "restrictNewMembersEnabled"
       | "nightModeEnabled"
       | "monthlyDigestEnabled"
+      | "joinRequestCaptchaEnabled"
   ) {
     bot.command(name, async (ctx) => {
       const lang = await langFor(ctx);
@@ -331,6 +332,10 @@ export function registerCommands(bot: Bot): void {
   toggleCommand("restrictnewmembers", "restrictNewMembersEnabled");
   toggleCommand("nightmode", "nightModeEnabled");
   toggleCommand("digest", "monthlyDigestEnabled");
+  // Only has any effect for a group in "approve new members" mode — see the
+  // chat_join_request handler in bot.ts. Harmless no-op otherwise, same as
+  // toggling captchaEnabled on a group that never turned that mode on.
+  toggleCommand("joinrequestcaptcha", "joinRequestCaptchaEnabled");
 
   bot.command("restrictminutes", async (ctx) => {
     const lang = await langFor(ctx);

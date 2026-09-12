@@ -42,6 +42,11 @@ import { formatPermissionWarning, isChatAdmin } from "./adminCheck";
 import { registerCommands } from "./commands";
 import { applyViolation } from "./violations";
 import { startCaptcha, sweepExpiredCaptchas, verifyCaptcha } from "./captcha";
+import {
+  startJoinRequestCaptcha,
+  sweepExpiredJoinRequestCaptchas,
+  verifyJoinRequestCaptcha,
+} from "./joinRequestCaptcha";
 import { castVote, clearVoteBan, getVoteBanMessageId, liftSanction } from "./voteban";
 import { sendWelcomeMessage } from "./welcome";
 import { activateProPlan, parseProPayload, parseUnbanPayload } from "./payments";
@@ -265,7 +270,55 @@ export function getBot(): Bot {
         incrementStat(chat.id, "spam").catch(() => {}),
         incrementReasonTag(chat.id, "cas").catch(() => {}),
       ]);
+      return;
     }
+
+    // Opt-in, additive only (see the comment above this handler) — when off
+    // (the default), a non-flagged request is left exactly as untouched as it
+    // always was. A DM delivery failure is treated as "can't act", same as the
+    // rest of this handler when there's nothing to prove against the user —
+    // never declined just because the captcha couldn't be shown.
+    if (settings.joinRequestCaptchaEnabled) {
+      await startJoinRequestCaptcha(
+        ctx.api,
+        chat.id,
+        chat.title ?? "",
+        user,
+        settings.lang,
+        settings.captchaTimeoutSeconds
+      );
+    }
+  });
+
+  // Join-request captcha answer — see lib/telegram/joinRequestCaptcha.ts. Kept
+  // separate from the `cap:` group-captcha pattern below: different lifecycle
+  // (approves/declines a join request, not restrict permissions) and always
+  // carries both chatId and userId explicitly since there's no ctx.chat here
+  // (the callback fires from the requester's private chat with the bot, not
+  // from the group they're trying to join).
+  bot.callbackQuery(/^jrc:(-?\d+):(\d+):(\w+):(-?\d+)$/, async (ctx) => {
+    const [, chatIdStr, userIdStr, token, answerStr] = ctx.match;
+    const chatId = Number(chatIdStr);
+    const userId = Number(userIdStr);
+    const answer = Number(answerStr);
+    if (ctx.callbackQuery.from.id !== userId) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+
+    const settings = await getGroupSettings(chatId);
+    const lang = settings?.lang ?? detectLang(ctx.callbackQuery.from.language_code);
+
+    const result = await verifyJoinRequestCaptcha(ctx.api, chatId, userId, token, answer);
+    if (result === "wrong-answer") {
+      await ctx.answerCallbackQuery({ text: t(lang, "bot.captchaWrongAnswer"), show_alert: true });
+      return;
+    }
+    if (result === "expired-or-unknown") {
+      await ctx.answerCallbackQuery({ text: t(lang, "bot.joinRequestCaptchaExpired"), show_alert: true });
+      return;
+    }
+    await ctx.answerCallbackQuery({ text: t(lang, "bot.joinRequestCaptchaApproved") });
   });
 
   // Captcha button — a trailing `:<answer>` segment is present only for the
@@ -583,7 +636,10 @@ export function getBot(): Bot {
     if (!settings) return;
 
     // An edit isn't a new message — don't count it toward "messages" activity stats.
-    const sideEffects = [sweepExpiredCaptchas(ctx.api, chat.id).catch(() => {})];
+    const sideEffects = [
+      sweepExpiredCaptchas(ctx.api, chat.id).catch(() => {}),
+      sweepExpiredJoinRequestCaptchas(ctx.api, chat.id).catch(() => {}),
+    ];
     if (!isEdit) {
       sideEffects.push(incrementActivity(chat.id, "messages").catch(() => {}));
       sideEffects.push(incrementHourlyActivity(chat.id).catch(() => {}));

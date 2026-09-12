@@ -330,6 +330,30 @@ export function registerCommands(bot: Bot): void {
       logChannel: settings.logChannelId ? String(settings.logChannelId) : t(lang, "miniapp.logChannelNotSet"),
     });
 
+    // The block above only ever covered the original 6 fields — every toggle
+    // added since (captcha, antiraid, channel-gate, ...) was configurable but
+    // invisible here, so an admin had no text-command way to confirm what's
+    // actually on without opening the Mini App. Surfaced explicitly after a
+    // real support case where "почти всё включено" turned out to be
+    // unverifiable from /settings alone.
+    message += "\n" + t(lang, "bot.settingsExtraLine", {
+      captcha: settings.captchaEnabled ? `${onOff(true)} (${settings.captchaType})` : onOff(false),
+      joinRequestCaptcha: onOff(settings.joinRequestCaptchaEnabled),
+      antiraid: onOff(settings.antiraidEnabled || settings.antiraidAuto),
+      cas: onOff(settings.casCheckEnabled),
+      restrictNewMembers: onOff(settings.restrictNewMembersEnabled),
+      warnEscalation: onOff(settings.warnEscalationEnabled),
+      nightMode: onOff(settings.nightModeEnabled),
+      federation: onOff(settings.federationEnabled),
+      ownerChannel:
+        settings.ownerChannelGateEnabled && settings.ownerChannelUsername
+          ? `${onOff(true)} (@${settings.ownerChannelUsername})`
+          : onOff(false),
+      promoChannel: onOff(settings.promoChannelOptIn),
+      welcome: onOff(settings.welcomeEnabled),
+      monthlyDigest: onOff(settings.monthlyDigestEnabled),
+    });
+
     message += "\n" + t(lang, "bot.planStatusLine", { plan: formatPlanLabel(settings, lang) });
 
     const perms = await getBotPermissions(ctx.api, ctx.chat!.id);

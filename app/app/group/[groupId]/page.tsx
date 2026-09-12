@@ -12,7 +12,7 @@ import { Badge } from "@/components/Badge";
 import { StatTile } from "@/components/StatTile";
 import { PermissionWarning } from "@/components/PermissionWarning";
 import { Collapsible } from "@/components/Collapsible";
-import { haptic, hapticNotify, openInvoice } from "@/lib/miniapp/telegram";
+import { haptic, hapticNotify, openInvoice, openTelegramLink } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
 import { isProActive, formatPlanDate, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
 import {
@@ -48,6 +48,7 @@ export default function GroupSettingsPage() {
     federationEligible,
     whitelistCount,
     violationsToday,
+    supportUrl,
     updateSettings,
     chatId,
     refresh,
@@ -852,6 +853,22 @@ export default function GroupSettingsPage() {
           </Collapsible>
         </CardSection>
       </Card>
+      {supportUrl && (
+        <Card>
+          <CardSection>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                haptic();
+                openTelegramLink(supportUrl);
+              }}
+              className="w-full"
+            >
+              {t("miniapp.supportEntryButton")}
+            </Button>
+          </CardSection>
+        </Card>
+      )}
     </div>
   );
 }

@@ -23,6 +23,10 @@ interface GroupStatusFields {
    * A snapshot-on-open glance, not a live counter. */
   whitelistCount: number;
   violationsToday: number;
+  /** `t.me/<bot>?start=support_<chatId>` — "Написать разработчику" deep link,
+   * or null when TELEGRAM_BOT_USERNAME isn't provisioned (page must then omit
+   * the button, same convention as the other *Url fields elsewhere). */
+  supportUrl: string | null;
 }
 
 interface GroupContextValue extends GroupStatusFields {
@@ -47,6 +51,7 @@ const EMPTY_STATUS: GroupStatusFields = {
   federationEligible: true,
   whitelistCount: 0,
   violationsToday: 0,
+  supportUrl: null,
 };
 
 export function GroupProvider({ chatId, children }: { chatId: number; children: React.ReactNode }) {
@@ -74,6 +79,7 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
           federationEligible: data.federationEligible ?? true,
           whitelistCount: data.whitelistCount ?? 0,
           violationsToday: data.violationsToday ?? 0,
+          supportUrl: data.supportUrl ?? null,
         });
         setStatus("ready");
       })
@@ -124,6 +130,7 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
             federationEligible: data.federationEligible ?? prev.federationEligible,
             whitelistCount: data.whitelistCount ?? prev.whitelistCount,
             violationsToday: data.violationsToday ?? prev.violationsToday,
+            supportUrl: prev.supportUrl,
           }));
           return data.settings;
         },

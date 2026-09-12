@@ -7,6 +7,7 @@ import { getBotPermissions, isBotAdminOfChat, missingPermissionsFor } from "@/li
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { getStats } from "@/lib/db/stats";
 import { canUseProFeature } from "@/lib/billing/plan";
+import { supportUrl } from "@/lib/telegram/support";
 import type { GroupSettings } from "@/lib/db/types";
 
 export const runtime = "nodejs";
@@ -54,6 +55,10 @@ export async function GET(
     federationEligible: canUseProFeature(settings, memberCount),
     whitelistCount: whitelist.length,
     violationsToday: todayStats.total,
+    // Null when TELEGRAM_BOT_USERNAME isn't provisioned — the page must then
+    // simply omit the "Написать разработчику" button, same convention as
+    // addToGroupUrl()/appealUrl() elsewhere.
+    supportUrl: supportUrl(chatId),
   });
 }
 

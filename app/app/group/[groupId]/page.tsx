@@ -54,6 +54,8 @@ export default function GroupSettingsPage() {
   } = useGroup();
   const [toast, setToast] = useState<string | null>(null);
   const [logChannelInput, setLogChannelInput] = useState(settings?.logChannelId?.toString() ?? "");
+  const [ownerChannelInput, setOwnerChannelInput] = useState(settings?.ownerChannelUsername ?? "");
+  const [savingOwnerChannel, setSavingOwnerChannel] = useState(false);
   const [welcomeInput, setWelcomeInput] = useState(settings?.welcomeMessage ?? "");
   const [rulesTextInput, setRulesTextInput] = useState(settings?.rulesText ?? "");
   const [savingLogChannel, setSavingLogChannel] = useState(false);
@@ -98,6 +100,25 @@ export default function GroupSettingsPage() {
     } catch {
       hapticNotify("error");
       flash(t("miniapp.errorToast"));
+    }
+  }
+
+  async function saveOwnerChannel() {
+    const trimmed = ownerChannelInput.trim();
+    setSavingOwnerChannel(true);
+    try {
+      const rejected = await updateSettings({ ownerChannelUsername: trimmed === "" ? null : trimmed } as never);
+      if (rejected.includes("ownerChannelUsername")) {
+        hapticNotify("error");
+        flash(t("miniapp.ownerChannelNotAdmin"));
+      } else {
+        flash(t("miniapp.savedToast"));
+      }
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    } finally {
+      setSavingOwnerChannel(false);
     }
   }
 
@@ -673,6 +694,37 @@ export default function GroupSettingsPage() {
               {t("common.save")}
             </Button>
           </div>
+        </CardSection>
+      </Card>
+
+      <Card>
+        <CardSection title={t("miniapp.channelGateTitle")} subtitle={t("miniapp.channelGateHint")}>
+          <div className="flex gap-2 mb-3">
+            <input
+              value={ownerChannelInput}
+              onChange={(e) => setOwnerChannelInput(e.target.value)}
+              placeholder={t("miniapp.channelGatePlaceholder")}
+              className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+              style={{ borderColor: "var(--border-strong)" }}
+            />
+            <Button variant="primary" onClick={saveOwnerChannel} disabled={savingOwnerChannel} className="shrink-0">
+              {t("common.save")}
+            </Button>
+          </div>
+          <Row label={t("miniapp.channelGateEnabledLabel")}>
+            <Toggle
+              checked={settings.ownerChannelGateEnabled}
+              onChange={(v) => setField("ownerChannelGateEnabled", v)}
+              disabled={!settings.ownerChannelId}
+            />
+          </Row>
+          <Divider />
+          <Row label={t("miniapp.helpProjectLabel")}>
+            <Toggle checked={settings.promoChannelOptIn} onChange={(v) => setField("promoChannelOptIn", v)} />
+          </Row>
+          <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
+            {t("miniapp.helpProjectHint")}
+          </p>
         </CardSection>
       </Card>
 

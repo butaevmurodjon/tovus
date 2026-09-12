@@ -668,6 +668,67 @@ export function registerCommands(bot: Bot): void {
     }
   });
 
+  // Force-sub to the GROUP OWNER'S OWN channel — same shape as /logchannel:
+  // the bot must already be an admin of that channel (so getChatMember calls
+  // against it later actually work), checked once here rather than
+  // discovered as a silent fail-open the first time a real member is gated.
+  bot.command("setchannel", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim();
+    if (!arg || arg.toLowerCase() === "off") {
+      await updateGroupSettings(ctx.chat!.id, {
+        ownerChannelGateEnabled: false,
+        ownerChannelId: null,
+        ownerChannelUsername: null,
+      });
+      await ctx.reply(t(lang, "bot.channelGateSetupSaved"));
+      return;
+    }
+    try {
+      const chat = await ctx.api.getChat(/^-?\d+$/.test(arg) ? Number(arg) : arg);
+      if (chat.type !== "channel" || !(await isBotAdminOfChat(ctx.api, chat.id))) {
+        return ctx.reply(t(lang, "bot.channelGateSetupInvalid"));
+      }
+      await updateGroupSettings(ctx.chat!.id, {
+        ownerChannelId: chat.id,
+        ownerChannelUsername: "username" in chat ? (chat.username ?? null) : null,
+        ownerChannelGateEnabled: true,
+      });
+      await ctx.reply(t(lang, "bot.channelGateSetupSaved"));
+    } catch (err) {
+      if (err instanceof GrammyError) return ctx.reply(t(lang, "bot.channelGateSetupInvalid"));
+      throw err;
+    }
+  });
+
+  bot.command("channelgate", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim().toLowerCase();
+    if (arg !== "on" && arg !== "off") return ctx.reply(t(lang, "bot.channelGateSetupUsage"));
+    const settings = await getGroupSettings(ctx.chat!.id);
+    if (arg === "on" && !settings?.ownerChannelId) return ctx.reply(t(lang, "bot.channelGateSetupUsage"));
+    await updateGroupSettings(ctx.chat!.id, { ownerChannelGateEnabled: arg === "on" });
+    await ctx.reply(t(lang, "bot.settingUpdated"));
+  });
+
+  // "Помочь проекту": strictly opt-in gate on THIS bot's own promo channel —
+  // never bundled into another toggle, never on by default (MONETIZATION.md
+  // §"реклама в групповом чате — не рассматриваем"). An admin who never runs
+  // this command gets no promo-channel gating, full stop.
+  bot.command("helpproject", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const arg = ctx.match?.toString().trim().toLowerCase();
+    if (arg !== "on" && arg !== "off") return ctx.reply(t(lang, "bot.channelGateSetupUsage"));
+    await updateGroupSettings(ctx.chat!.id, { promoChannelOptIn: arg === "on" });
+    await ctx.reply(t(lang, "bot.settingUpdated"));
+  });
+
   bot.command("stats", async (ctx) => {
     const lang = await langFor(ctx);
     if (!(await requireGroupChat(ctx, lang))) return;

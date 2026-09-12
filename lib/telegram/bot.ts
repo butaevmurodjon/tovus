@@ -42,6 +42,14 @@ import { formatPermissionWarning, isChatAdmin } from "./adminCheck";
 import { registerCommands } from "./commands";
 import { applyViolation } from "./violations";
 import { startCaptcha, sweepExpiredCaptchas, verifyCaptcha } from "./captcha";
+import {
+  GATE_CALLBACK_PATTERN,
+  checkChannelGate,
+  invalidateGateCache,
+  sendChannelGatePrompt,
+  shouldShowGatePrompt,
+  type GateCheckResult,
+} from "./channelGate";
 import { castVote, clearVoteBan, getVoteBanMessageId, liftSanction } from "./voteban";
 import { sendWelcomeMessage } from "./welcome";
 import { activateProPlan, parseProPayload, parseUnbanPayload } from "./payments";
@@ -292,6 +300,40 @@ export function getBot(): Bot {
       return;
     }
     await ctx.answerCallbackQuery();
+  });
+
+  // Channel-gate "Я подписался" recheck — re-runs the same check the message
+  // handler used, so a stale cache (subscribed a second ago) can't wrongly
+  // pass; invalidateGateCache forces a fresh getChatMember read.
+  bot.callbackQuery(GATE_CALLBACK_PATTERN, async (ctx) => {
+    const chat = ctx.chat;
+    if (!chat) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const [, targetIdStr] = ctx.match;
+    const targetUserId = Number(targetIdStr);
+    if (ctx.callbackQuery.from.id !== targetUserId) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+    const settings = await getGroupSettings(chat.id);
+    const lang = settings?.lang ?? detectLang(ctx.callbackQuery.from.language_code);
+    if (!settings) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+
+    const gate = await checkChannelGate(ctx.api, settings, targetUserId).catch(
+      (): GateCheckResult => ({ passed: true, unmet: [] })
+    );
+    if (gate.passed) {
+      await ctx.answerCallbackQuery({ text: t(lang, "bot.channelGatePassed") });
+      await ctx.deleteMessage().catch(() => {});
+      return;
+    }
+    await invalidateGateCache(gate.unmet, targetUserId);
+    await ctx.answerCallbackQuery({ text: t(lang, "bot.channelGateStillNotSubscribed"), show_alert: true });
   });
 
   // Vote-ban (§15.4): the chat_id is encoded in callback_data mainly for
@@ -644,6 +686,23 @@ export function getBot(): Bot {
       console.error("[bot] admin/whitelist check failed, moderating anyway", chat.id, from.id, err);
     }
     if (admin || whitelisted) return;
+
+    // Force-sub gate (owner's own channel and/or the opt-in "помочь проекту"
+    // promo channel) — an access-control gate, not a moderation verdict, so
+    // it runs before moderateMessage and independently of it. Skipped
+    // entirely (no extra Redis round trip) when neither source is on.
+    if (settings.ownerChannelGateEnabled || settings.promoChannelOptIn) {
+      const gate = await checkChannelGate(ctx.api, settings, from.id).catch(
+        (): GateCheckResult => ({ passed: true, unmet: [] })
+      );
+      if (!gate.passed) {
+        await ctx.api.deleteMessage(chat.id, message.message_id).catch(() => {});
+        if (await shouldShowGatePrompt(chat.id, from.id)) {
+          await sendChannelGatePrompt(ctx.api, chat.id, from, settings.lang, gate.unmet);
+        }
+        return;
+      }
+    }
 
     const verdict = await moderateMessage(message, settings, { isEdit });
     // §4 Этап 1, shadow-only: computed and logged after the real verdict is

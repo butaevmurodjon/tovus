@@ -763,14 +763,20 @@ export default function GroupSettingsPage() {
                   <SegmentedControl
                     value={settings.captchaType}
                     onChange={(v) => setField("captchaType", v)}
-                    columns={3}
+                    columns={4}
                     options={[
                       { value: "button", label: t("miniapp.captchaTypeButton") },
                       { value: "math", label: t("miniapp.captchaTypeMath") },
                       { value: "rules", label: t("miniapp.captchaTypeRules") },
+                      { value: "message", label: t("miniapp.captchaTypeMessage") },
                     ]}
                   />
                 </div>
+                {settings.captchaType === "message" && (
+                  <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
+                    {t("miniapp.captchaTypeMessageHint")}
+                  </p>
+                )}
                 {settings.captchaType === "rules" && (
                   <div className="mb-3">
                     <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>

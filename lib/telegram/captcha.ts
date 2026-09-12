@@ -2,6 +2,7 @@ import type { Api } from "grammy";
 import { GrammyError } from "grammy";
 import type { User } from "grammy/types";
 import { getRedis } from "@/lib/db/redis";
+import { setPendingAction } from "@/lib/db/pendingAction";
 import type { CaptchaType } from "@/lib/db/types";
 import { t, type Lang } from "@/lib/i18n";
 import { escapeHtml, mentionHtml } from "./format";
@@ -27,6 +28,11 @@ interface CaptchaState {
   type: CaptchaType;
   /** Only set for type "math" — the one button value that verifies the user. */
   correctAnswer?: number;
+  /** Only set for type "message" — lowercased, compared against the trimmed/
+   * lowercased text the member types back in private chat (see
+   * verifyMessageCaptcha). The word itself is shown uppercase in the group
+   * prompt; stored lowercase here so comparison is a single toLowerCase(). */
+  word?: string;
 }
 
 function randomToken(): string {
@@ -57,9 +63,50 @@ function randomMathQuestion(): { a: number; b: number; correct: number; options:
   return { a, b, correct, options: shuffle([correct, ...wrong]) };
 }
 
+// Excludes 0/O/1/I/L and lowercase-look-alikes — this gets typed back by hand
+// from a phone keyboard after a context switch (group → deep link → private
+// chat), so ambiguous glyphs cost real users a failed attempt, not just
+// bots. Uppercase-only alphabet; comparison lowercases both sides.
+const WORD_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+const WORD_LENGTH = 5;
+
+/** Exported for tests only. */
+export function randomWord(): string {
+  let out = "";
+  for (let i = 0; i < WORD_LENGTH; i++) {
+    out += WORD_ALPHABET[Math.floor(Math.random() * WORD_ALPHABET.length)];
+  }
+  return out;
+}
+
+/** `?start=capdm_<chatId>` — opens the bot in a PRIVATE chat for the "message"
+ * captcha type: the group prompt shows a word but can't collect the typed
+ * answer itself (the member is muted there), so it links here instead. Same
+ * shape as commands.ts's appealUrl/referralUrl, kept local to this file to
+ * avoid captcha.ts <-> commands.ts becoming a circular import (commands.ts
+ * already imports normalizeRulesText from here). */
+export function messageCaptchaUrl(chatId: number): string | null {
+  const username = process.env.TELEGRAM_BOT_USERNAME;
+  if (!username) return null;
+  return `https://t.me/${username}?start=capdm_${chatId}`;
+}
+
+/** `capdm_<chatId>` from a `?start=` payload — same digit/sign shape as
+ * commands.ts's parseAppealPayload (chat ids are always negative for
+ * supergroups). */
+export function parseMessageCaptchaPayload(payload: string | undefined | null): number | null {
+  if (!payload) return null;
+  const match = /^capdm_(-?\d{1,15})$/.exec(payload.trim());
+  if (!match) return null;
+  const chatId = Number(match[1]);
+  return Number.isSafeInteger(chatId) ? chatId : null;
+}
+
 /** Mutes the new member and posts a "prove you're human" prompt — a one-tap
- * button, or a simple math question when `type` is "math" — with the answer(s)
- * as inline buttons. */
+ * button, a simple math question when `type` is "math", an agree-to-rules
+ * gate when "rules", or (type "message") a word to type back in a private
+ * chat reached via deep link, since a muted member can't type in the group
+ * itself. */
 export async function startCaptcha(
   api: Api,
   chatId: number,
@@ -68,7 +115,20 @@ export async function startCaptcha(
   options: { type: CaptchaType; timeoutSeconds: number; rulesText?: string | null }
 ): Promise<void> {
   const token = randomToken();
-  const { type, timeoutSeconds, rulesText } = options;
+  const { type, rulesText } = options;
+  // "message" needs a longer runway than the shared group default (120s):
+  // it adds a click-through-then-type round trip (group prompt → deep link →
+  // Telegram switches chats → type the word) on top of what button/math/
+  // rules need, and that extra hop is exactly the part most likely to stall
+  // on a slow connection or a member who doesn't immediately notice the
+  // button. Floors the effective window rather than trusting whatever the
+  // group's shared captchaTimeoutSeconds happens to be — a group that set a
+  // short timeout for the (fast) button/math types shouldn't silently kick
+  // "message" members before they've had a real chance to complete a
+  // multi-step flow they may not have even seen the button for yet.
+  const MESSAGE_CAPTCHA_MIN_SECONDS = 180;
+  const timeoutSeconds =
+    type === "message" ? Math.max(options.timeoutSeconds, MESSAGE_CAPTCHA_MIN_SECONDS) : options.timeoutSeconds;
   const until = Math.floor(Date.now() / 1000) + timeoutSeconds;
 
   await api
@@ -77,39 +137,80 @@ export async function startCaptcha(
 
   let text: string;
   let correctAnswer: number | undefined;
-  let buttons: { text: string; callback_data: string }[];
+  let word: string | undefined;
+  let inline_keyboard: ({ text: string; callback_data: string } | { text: string; url: string })[][];
 
   if (type === "math") {
     const { a, b, correct, options: answerOptions } = randomMathQuestion();
     correctAnswer = correct;
     text = t(lang, "bot.captchaMathPrompt", { user: mentionHtml(user), seconds: timeoutSeconds, a, b });
-    buttons = answerOptions.map((value) => ({
+    const buttons = answerOptions.map((value) => ({
       text: String(value),
       callback_data: `cap:${user.id}:${token}:${value}`,
     }));
+    inline_keyboard = [buttons.slice(0, 2), buttons.slice(2)];
   } else if (type === "rules") {
     const rules = rulesText ? escapeHtml(rulesText) : t(lang, "bot.captchaRulesDefault");
     text = t(lang, "bot.captchaRulesPrompt", { user: mentionHtml(user), seconds: timeoutSeconds, rules });
-    buttons = [{ text: t(lang, "bot.captchaRulesButton"), callback_data: `cap:${user.id}:${token}` }];
+    inline_keyboard = [[{ text: t(lang, "bot.captchaRulesButton"), callback_data: `cap:${user.id}:${token}` }]];
+  } else if (type === "message") {
+    word = randomWord();
+    const url = messageCaptchaUrl(chatId);
+    text = t(lang, "bot.messageCaptchaGroupPrompt", {
+      user: mentionHtml(user),
+      seconds: timeoutSeconds,
+      word,
+    });
+    // No URL means TELEGRAM_BOT_USERNAME isn't provisioned — same "just omit
+    // the button" degrade addToGroupUrl's callers already use, rather than
+    // rendering a broken link. The member still gets kicked on timeout same
+    // as any other unanswered captcha; there's nothing else this can do.
+    inline_keyboard = url ? [[{ text: t(lang, "bot.messageCaptchaOpenBotButton"), url }]] : [];
   } else {
     text = t(lang, "bot.captchaPrompt", { user: mentionHtml(user), seconds: timeoutSeconds });
-    buttons = [{ text: t(lang, "bot.captchaButton"), callback_data: `cap:${user.id}:${token}` }];
+    inline_keyboard = [[{ text: t(lang, "bot.captchaButton"), callback_data: `cap:${user.id}:${token}` }]];
   }
-
-  const inline_keyboard = type === "math" ? [buttons.slice(0, 2), buttons.slice(2)] : [buttons];
 
   const sent = await api.sendMessage(chatId, text, {
     parse_mode: "HTML",
-    reply_markup: { inline_keyboard },
+    reply_markup: inline_keyboard.length > 0 ? { inline_keyboard } : undefined,
   });
 
   const redis = getRedis();
-  const state: CaptchaState = { token, promptMessageId: sent.message_id, type, correctAnswer };
+  const state: CaptchaState = {
+    token,
+    promptMessageId: sent.message_id,
+    type,
+    correctAnswer,
+    word: word?.toLowerCase(),
+  };
   await redis.set(stateKey(chatId, user.id), state, { ex: timeoutSeconds });
   await redis.sadd(pendingSetKey(chatId), user.id);
 }
 
 export type VerifyResult = "ok" | "wrong-user" | "wrong-answer" | "expired-or-unknown";
+
+/** Restores full send permissions and deletes the group prompt — the one
+ * side effect every captcha type ends with once it's actually resolved.
+ * Shared by verifyCaptcha (callback-based types) and verifyMessageCaptcha
+ * (the DM-answered "message" type). */
+async function restoreFullPermissionsAndClearPrompt(api: Api, chatId: number, userId: number, promptMessageId: number) {
+  await api
+    .restrictChatMember(chatId, userId, {
+      can_send_messages: true,
+      can_send_audios: true,
+      can_send_documents: true,
+      can_send_photos: true,
+      can_send_videos: true,
+      can_send_video_notes: true,
+      can_send_voice_notes: true,
+      can_send_polls: true,
+      can_send_other_messages: true,
+      can_add_web_page_previews: true,
+    })
+    .catch(() => {});
+  await api.deleteMessage(chatId, promptMessageId).catch(() => {});
+}
 
 /** Restores full permissions and clears the prompt once the right user clicks the
  * right button — for "math", `answer` must match the stored correct value; for
@@ -130,22 +231,60 @@ export async function verifyCaptcha(
   if (state.type === "math" && state.correctAnswer !== answer) return "wrong-answer";
 
   await Promise.all([redis.del(stateKey(chatId, targetUserId)), redis.srem(pendingSetKey(chatId), targetUserId)]);
+  await restoreFullPermissionsAndClearPrompt(api, chatId, targetUserId, state.promptMessageId);
 
-  await api
-    .restrictChatMember(chatId, targetUserId, {
-      can_send_messages: true,
-      can_send_audios: true,
-      can_send_documents: true,
-      can_send_photos: true,
-      can_send_videos: true,
-      can_send_video_notes: true,
-      can_send_voice_notes: true,
-      can_send_polls: true,
-      can_send_other_messages: true,
-      can_add_web_page_previews: true,
-    })
-    .catch(() => {});
-  await api.deleteMessage(chatId, state.promptMessageId).catch(() => {});
+  return "ok";
+}
+
+export type MessageCaptchaDmResult = "ok" | "not-found";
+
+/**
+ * Called from the `/start capdm_<chatId>` handler once the member clicks the
+ * deep-link button from the group prompt. Looks up the still-pending group
+ * captcha state for (chatId, userId) — note this is keyed by the TARGET
+ * member's own id, so a different group member clicking the same URL button
+ * (it's a URL, not a per-user callback) simply finds no matching state and
+ * gets "not-found", with no separate "wrong user" check needed. On success,
+ * registers a pendingAction so the member's NEXT private text message is
+ * checked against the word (see verifyMessageCaptcha / commands.ts's
+ * message:text listener) — TTL matches whatever's left on the group captcha
+ * itself, so the DM step can never outlive the thing it's verifying.
+ */
+export async function startMessageCaptchaDm(userId: number, chatId: number): Promise<MessageCaptchaDmResult> {
+  const redis = getRedis();
+  const key = stateKey(chatId, userId);
+  const state = await redis.get<CaptchaState>(key);
+  if (!state || state.type !== "message" || !state.word) return "not-found";
+
+  const ttl = await redis.ttl(key);
+  const ttlSeconds = ttl && ttl > 0 ? ttl : 60;
+  await setPendingAction(userId, "captcha", { chatId }, ttlSeconds);
+  return "ok";
+}
+
+export type MessageVerifyResult = "ok" | "wrong-answer" | "expired-or-unknown";
+
+/** The other half of the "message" captcha type — compares the text the
+ * member typed in private chat against the word shown in the group prompt.
+ * A wrong guess is NOT a terminal failure (unlike verifyCaptcha's
+ * "wrong-answer", which here just means "try again"): the caller must leave
+ * the pendingAction in place so the member can retype until the shared
+ * timeout actually expires, exactly like getting the math question wrong
+ * used to just re-show the same buttons. */
+export async function verifyMessageCaptcha(
+  api: Api,
+  chatId: number,
+  userId: number,
+  rawAnswer: string
+): Promise<MessageVerifyResult> {
+  const redis = getRedis();
+  const key = stateKey(chatId, userId);
+  const state = await redis.get<CaptchaState>(key);
+  if (!state || state.type !== "message" || !state.word) return "expired-or-unknown";
+  if (rawAnswer.trim().toLowerCase() !== state.word) return "wrong-answer";
+
+  await Promise.all([redis.del(key), redis.srem(pendingSetKey(chatId), userId)]);
+  await restoreFullPermissionsAndClearPrompt(api, chatId, userId, state.promptMessageId);
 
   return "ok";
 }

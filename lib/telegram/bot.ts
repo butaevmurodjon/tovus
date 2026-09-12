@@ -2,6 +2,7 @@ import { Bot, webhookCallback } from "grammy";
 import type { Api } from "grammy";
 import { after } from "next/server";
 import type { Message, User } from "grammy/types";
+import type { CaptchaType } from "@/lib/db/types";
 import {
   getGroupSettings,
   isRegisteredGroup,
@@ -648,12 +649,17 @@ export function getBot(): Bot {
             // so no eligibility gate here any more. A raid, impersonation,
             // bad-profile, or network-join match forces VERIFICATION
             // specifically (proving non-bot-ness), so it always uses "button"
-            // even when the group's configured type is "rules" — an "I agree
-            // to the rules" click doesn't prove that.
+            // even when the group's configured type is "rules" (an "I agree
+            // to the rules" click doesn't prove that) or "message" (proves
+            // non-bot-ness fine, but a raid wants the fastest resolution —
+            // the click-through-then-type DM round trip is exactly the wrong
+            // shape when many joins need clearing quickly, see captcha.ts's
+            // MESSAGE_CAPTCHA_MIN_SECONDS comment on why it's slower by design).
             const forced = isRaid || isImpersonator || Boolean(badProfile) || isNetworkJoin;
+            const slowTypesUnderForce: CaptchaType[] = ["rules", "message"];
             if (settings.captchaEnabled || forced) {
               await startCaptcha(ctx.api, chat.id, member, settings.lang, {
-                type: forced && settings.captchaType === "rules" ? "button" : settings.captchaType,
+                type: forced && slowTypesUnderForce.includes(settings.captchaType) ? "button" : settings.captchaType,
                 timeoutSeconds: settings.captchaTimeoutSeconds,
                 rulesText: settings.rulesText,
               }).catch(() => {});

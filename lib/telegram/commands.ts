@@ -34,9 +34,9 @@ import type { ViolationAction } from "@/lib/db/types";
 import { formatPermissionWarning, getBotPermissions, isBotAdminOfChat, isChatAdmin } from "./adminCheck";
 import { sendUpgradeInvoice } from "./payments";
 import { normalizeWelcomeMessage } from "./welcome";
-import { normalizeRulesText } from "./captcha";
+import { normalizeRulesText, parseMessageCaptchaPayload, startMessageCaptchaDm, verifyMessageCaptcha } from "./captcha";
+import { clearPendingActionIfKind, getPendingAction, setPendingAction } from "@/lib/db/pendingAction";
 import { displayName } from "./format";
-import { getPendingAction, setPendingAction, clearPendingActionIfKind } from "@/lib/db/pendingAction";
 import { isSupportOnCooldown, tryStartSupportCooldown } from "@/lib/db/supportTickets";
 import { ownerId } from "@/lib/owner";
 import { parseSupportPayload, relayOwnerReply, sendSupportTicketToOwner } from "./support";
@@ -203,6 +203,24 @@ export function registerCommands(bot: Bot): void {
         }
         await setPendingAction(ctx.from.id, "support", { groupId: supportGroupId }, 30 * 60);
         await ctx.reply(t(group.lang, "bot.supportDmPrompt", { title: group.title }));
+        return;
+      }
+
+      // "message" captcha type's deep link (see captcha.ts's messageCaptchaUrl/
+      // startMessageCaptchaDm) — the group prompt showed a word this member
+      // can't type back there (they're muted), so it sends them here instead.
+      // "not-found" covers both "never had one" and "already expired/solved" —
+      // same generic reply either way, nothing to distinguish for the user.
+      const captchaDmChatId = parseMessageCaptchaPayload(payload);
+      if (captchaDmChatId !== null && ctx.from) {
+        const group = await getGroupSettings(captchaDmChatId);
+        const dmLang = group?.lang ?? lang;
+        const result = await startMessageCaptchaDm(ctx.from.id, captchaDmChatId);
+        if (result === "not-found") {
+          await ctx.reply(t(dmLang, "bot.messageCaptchaExpired"));
+          return;
+        }
+        await ctx.reply(t(dmLang, "bot.messageCaptchaDmPrompt"));
         return;
       }
 
@@ -408,7 +426,8 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireGroupChat(ctx, lang))) return;
     if (!(await requireAdmin(ctx, lang))) return;
     const arg = ctx.match?.toString().trim().toLowerCase();
-    if (arg !== "button" && arg !== "math" && arg !== "rules") return ctx.reply(t(lang, "bot.captchatypeUsage"));
+    if (arg !== "button" && arg !== "math" && arg !== "rules" && arg !== "message")
+      return ctx.reply(t(lang, "bot.captchatypeUsage"));
     await updateGroupSettings(ctx.chat!.id, { captchaType: arg });
     await ctx.reply(t(lang, "bot.captchatypeSet", { type: arg }));
   });
@@ -788,6 +807,39 @@ export function registerCommands(bot: Bot): void {
         }) +
         reactionLine
     );
+  });
+
+  // The other half of the "message" captcha type, started by /start
+  // capdm_<chatId> above (which registers the pendingAction). Registered
+  // BEFORE the appeal listener below so a captcha answer always takes
+  // priority over a same-user pending appeal in the unlikely case both are
+  // outstanding at once — a captcha miss costs a kick, an appeal miss costs
+  // nothing but waiting a bit longer to retype /start. A wrong guess does
+  // NOT clear the pendingAction (unlike a correct one, or "expired"): the
+  // member can keep retrying until the shared timeout in captcha.ts actually
+  // runs out, same as getting the old math-question buttons wrong just let
+  // you tap another button. Passes through for every case that isn't "this
+  // exact private text is a pending captcha answer".
+  bot.on("message:text", async (ctx, next) => {
+    if (ctx.chat.type !== "private" || !ctx.from) return next();
+    if (ctx.message.text.startsWith("/")) return next();
+    const pending = await getPendingAction(ctx.from.id);
+    if (!pending || pending.kind !== "captcha") return next();
+
+    const { chatId } = pending.payload as { chatId: number };
+    const group = await getGroupSettings(chatId);
+    const lang = group?.lang ?? detectLang(ctx.from.language_code);
+    const result = await verifyMessageCaptcha(ctx.api, chatId, ctx.from.id, ctx.message.text);
+    if (result === "wrong-answer") {
+      await ctx.reply(t(lang, "bot.messageCaptchaWrongAnswer"));
+      return;
+    }
+    await clearPendingActionIfKind(ctx.from.id, "captcha");
+    if (result === "expired-or-unknown") {
+      await ctx.reply(t(lang, "bot.messageCaptchaExpired"));
+      return;
+    }
+    await ctx.reply(t(lang, "bot.messageCaptchaPassed"));
   });
 
   // The other half of the appeal flow started by /start appeal_<chatId>

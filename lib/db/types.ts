@@ -28,7 +28,8 @@ export type PlanTier = "free" | "pro";
 /** "message" (type the shown word back, collected in **private chat** via a
  * deep link — the member is muted in-group, same as the other types, so the
  * answer can never be typed in the group itself) joins the existing
- * button/math/rules types. See lib/telegram/messageCaptcha.ts. */
+ * button/math/rules types. See lib/telegram/captcha.ts (startMessageCaptchaDm/
+ * verifyMessageCaptcha). */
 export type CaptchaType = "button" | "math" | "rules" | "message";
 
 export interface GroupSettings {

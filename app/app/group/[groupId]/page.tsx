@@ -752,6 +752,16 @@ export default function GroupSettingsPage() {
               </>
             )}
             <Divider />
+            <Row label={t("miniapp.joinRequestCaptchaTitle")}>
+              <Toggle
+                checked={settings.joinRequestCaptchaEnabled}
+                onChange={(v) => setField("joinRequestCaptchaEnabled", v)}
+              />
+            </Row>
+            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.joinRequestCaptchaHint")}
+            </p>
+            <Divider />
             <Row label={t("miniapp.antiraidTitle")}>
               <Toggle checked={settings.antiraidEnabled} onChange={(v) => toggleProFeature("antiraidEnabled", v)} />
             </Row>

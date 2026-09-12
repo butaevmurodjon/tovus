@@ -198,12 +198,13 @@
     "channelGateSetupSaved": "Тайёр",
     "channelGateSetupInvalid": "Бундай канал топилмади, ёки бот у ерда админ эмас. Ботни каналга админ қилиб қўшинг ва қайтадан уриниб кўринг",
 
-    "_comment_support": "TODO(support-relay agent): fill in real copy, this is a placeholder reservation",
-    "supportEntryButton": "TODO supportEntryButton",
-    "supportDmPrompt": "TODO supportDmPrompt",
-    "supportSent": "TODO supportSent",
-    "supportCooldown": "TODO supportCooldown",
-    "supportReplyPrefix": "TODO supportReplyPrefix"
+    "supportEntryButton": "✉️ Дастурчига ёзиш",
+    "supportDmPrompt": "Савол ёки муаммони бир хабарда ёзиб беринг — ботнинг дастурчисига етказаман. Гап «{title}» гуруҳи ҳақида.",
+    "supportSent": "Раҳмат, хабар дастурчига етказилди. Жавоб худди шу ерга, шахсий хабарларга келади.",
+    "supportCooldown": "Сиз сўнгги 24 соатда дастурчига аллақачон хабар юборгансиз — қайта ёзишдан олдин жавобни кутинг.",
+    "supportReplyPrefix": "💬 «{title}» гуруҳи бўйича дастурчи жавоби:",
+    "supportReplyDelivered": "✅ Жавоб юборилди.",
+    "supportReplyFailed": "⚠️ Жавобни жўнатувчига етказиб бўлмади (ботни блоклаганми?)."
   },
   "miniapp": {
     "dashboardTitle": "Менинг гуруҳларим",

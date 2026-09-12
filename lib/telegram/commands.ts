@@ -36,6 +36,10 @@ import { sendUpgradeInvoice } from "./payments";
 import { normalizeWelcomeMessage } from "./welcome";
 import { normalizeRulesText } from "./captcha";
 import { displayName } from "./format";
+import { getPendingAction, setPendingAction, clearPendingActionIfKind } from "@/lib/db/pendingAction";
+import { isSupportOnCooldown, tryStartSupportCooldown } from "@/lib/db/supportTickets";
+import { ownerId } from "@/lib/owner";
+import { parseSupportPayload, relayOwnerReply, sendSupportTicketToOwner } from "./support";
 
 function miniAppButtonUrl(startParam: string): string | null {
   const username = process.env.TELEGRAM_BOT_USERNAME;
@@ -175,6 +179,30 @@ export function registerCommands(bot: Bot): void {
         }
         await setPendingAppeal(ctx.from.id, appealChatId);
         await ctx.reply(t(group.lang, "bot.appealPrompt", { title: group.title }));
+        return;
+      }
+
+      // "Написать разработчику" deep link from the Mini App (see supportUrl/
+      // parseSupportPayload in ./support). Only a real admin of that group may
+      // open a ticket "for" it — an arbitrary user hitting this link can't
+      // impersonate a group owner just by knowing/guessing the chat id.
+      const supportGroupId = parseSupportPayload(payload);
+      if (supportGroupId !== null && ctx.from) {
+        const group = await getGroupSettings(supportGroupId);
+        if (!group) {
+          await ctx.reply(t(lang, "bot.appealGroupUnavailable"));
+          return;
+        }
+        if (!(await isChatAdmin(ctx.api, supportGroupId, ctx.from.id))) {
+          await ctx.reply(t(lang, "bot.notAdminCommand"));
+          return;
+        }
+        if (await isSupportOnCooldown(ctx.from.id)) {
+          await ctx.reply(t(group.lang, "bot.supportCooldown"));
+          return;
+        }
+        await setPendingAction(ctx.from.id, "support", { groupId: supportGroupId }, 30 * 60);
+        await ctx.reply(t(group.lang, "bot.supportDmPrompt", { title: group.title }));
         return;
       }
 
@@ -804,5 +832,71 @@ export function registerCommands(bot: Bot): void {
       status: "open",
     });
     await ctx.reply(t(lang, "bot.appealSent", { title: group.title }));
+  });
+
+  // The bot owner replying (Telegram "Reply") to a relayed support ticket —
+  // see lib/telegram/support.ts. Checked before the support-ticket-body
+  // handler below since the owner is never the one with a pending "support"
+  // action; this only ever matches messages FROM the owner, in their own
+  // private chat with the bot, that reply to a message this bot sent them.
+  // Any other private message from the owner (a command, ordinary chat, a
+  // reply to something unrelated) falls through via next().
+  bot.on("message:text", async (ctx, next) => {
+    if (ctx.chat.type !== "private" || !ctx.from || ctx.from.id !== ownerId()) return next();
+    const replyToId = ctx.message.reply_to_message?.message_id;
+    if (replyToId === undefined) return next();
+
+    const lang = detectLang(ctx.from.language_code);
+    const result = await relayOwnerReply(ctx.api, ctx.from.id, replyToId, ctx.chat.id, ctx.message.text, lang);
+    if (result === "not-a-reply" || result === "no-ticket") return next();
+    if (result === "delivery-failed") {
+      await ctx.reply(t(lang, "bot.supportReplyFailed"));
+      return;
+    }
+    await ctx.reply(t(lang, "bot.supportReplyDelivered"));
+  });
+
+  // The other half of the support flow started by /start support_<groupId>
+  // (private-chat branch above). Same next()-passthrough discipline as the
+  // appeal handler: only a private text message from a user who currently
+  // has a pending "support" action is consumed here.
+  bot.on("message:text", async (ctx, next) => {
+    if (ctx.chat.type !== "private" || !ctx.from) return next();
+    if (ctx.message.text.startsWith("/")) return next();
+    const pending = await getPendingAction(ctx.from.id);
+    if (!pending || pending.kind !== "support") return next();
+
+    await clearPendingActionIfKind(ctx.from.id, "support");
+    const { groupId } = pending.payload as { groupId: number };
+    const group = await getGroupSettings(groupId);
+    const lang = group?.lang ?? detectLang(ctx.from.language_code);
+    if (!group) return ctx.reply(t(lang, "bot.appealGroupUnavailable"));
+
+    // Re-verify admin status at submit time, not just at /start time — an
+    // admin demoted in between shouldn't still get a ticket through.
+    if (!(await isChatAdmin(ctx.api, groupId, ctx.from.id))) {
+      return ctx.reply(t(lang, "bot.notAdminCommand"));
+    }
+
+    if (!(await tryStartSupportCooldown(ctx.from.id))) {
+      return ctx.reply(t(lang, "bot.supportCooldown"));
+    }
+
+    const text = ctx.message.text.slice(0, 2000);
+    const ticket = await sendSupportTicketToOwner(ctx.api, ownerId(), {
+      groupId,
+      groupTitle: group.title,
+      fromUserId: ctx.from.id,
+      fromUsername: ctx.from.username ?? null,
+      fromDisplayName: displayName(ctx.from),
+      text,
+    });
+    if (!ticket) {
+      // Owner unreachable — extremely unlikely (they'd have to have blocked
+      // their own bot), but must not silently claim success.
+      await ctx.reply(t(lang, "bot.appealUnavailable"));
+      return;
+    }
+    await ctx.reply(t(lang, "bot.supportSent"));
   });
 }

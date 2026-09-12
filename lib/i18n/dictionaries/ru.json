@@ -198,12 +198,13 @@
     "channelGateSetupSaved": "Готово",
     "channelGateSetupInvalid": "Не вижу такой канал, либо бот не админ там. Добавьте бота админом в канал и повторите",
 
-    "_comment_support": "TODO(support-relay agent): fill in real copy, this is a placeholder reservation",
-    "supportEntryButton": "TODO supportEntryButton",
-    "supportDmPrompt": "TODO supportDmPrompt",
-    "supportSent": "TODO supportSent",
-    "supportCooldown": "TODO supportCooldown",
-    "supportReplyPrefix": "TODO supportReplyPrefix"
+    "supportEntryButton": "✉️ Написать разработчику",
+    "supportDmPrompt": "Опишите вопрос или проблему одним сообщением — я передам разработчику бота. Речь о группе «{title}».",
+    "supportSent": "Спасибо, сообщение передано разработчику. Ответ придёт сюда же, в личные сообщения.",
+    "supportCooldown": "Вы уже отправляли сообщение разработчику за последние сутки — дождитесь ответа, прежде чем писать снова.",
+    "supportReplyPrefix": "💬 Ответ разработчика по группе «{title}»:",
+    "supportReplyDelivered": "✅ Ответ отправлен.",
+    "supportReplyFailed": "⚠️ Не удалось доставить ответ отправителю (заблокировал бота?)."
   },
   "miniapp": {
     "dashboardTitle": "Мои группы",

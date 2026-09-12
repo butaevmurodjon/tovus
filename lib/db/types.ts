@@ -272,6 +272,32 @@ export interface AppealEntry {
   offeredAt?: number;
 }
 
+/**
+ * A message a GROUP OWNER/ADMIN sent to the BOT OWNER (developer) — the
+ * "Написать разработчику" flow entered from the Mini App, conversation
+ * relayed through the bot itself (see lib/db/supportTickets.ts,
+ * lib/telegram/support.ts). Distinct from AppealEntry, which is a group
+ * MEMBER reaching that group's admin — this is a group admin reaching the
+ * bot's owner. No TTL: an owner must be able to reply to a ticket at any
+ * point, so entries persist until explicitly resolved.
+ */
+export interface SupportTicket {
+  id: string;
+  groupId: number;
+  groupTitle: string;
+  fromUserId: number;
+  fromUsername: string | null;
+  fromDisplayName: string;
+  text: string;
+  createdAt: number;
+  status: "open" | "replied" | "resolved";
+  /** chatId+messageId of the message relayed to the bot owner for THIS
+   * ticket — an owner's Telegram "Reply" on that message is how a reply
+   * routes back to `fromUserId` (see lib/telegram/support.ts). */
+  ownerChatId: number;
+  ownerMessageId: number;
+}
+
 export interface StatsBucket {
   total: number;
   profanity: number;

@@ -172,7 +172,39 @@
     "planPro": "PRO до {date}",
     "presetApplied": "Пресет «{preset}» применён: добавлено слов — {count}.",
     "presetUsage": "Использование: /preset agro|ecommerce|edtech|finance",
-    "presetUnknown": "Неизвестный пресет. Доступные: agro, ecommerce, edtech, finance"
+    "presetUnknown": "Неизвестный пресет. Доступные: agro, ecommerce, edtech, finance",
+
+    "_comment_messageCaptcha": "TODO(message-captcha agent): fill in real copy, this is a placeholder reservation",
+    "messageCaptchaGroupPrompt": "TODO messageCaptchaGroupPrompt",
+    "messageCaptchaOpenBotButton": "TODO messageCaptchaOpenBotButton",
+    "messageCaptchaDmPrompt": "TODO messageCaptchaDmPrompt",
+    "messageCaptchaWrongAnswer": "TODO messageCaptchaWrongAnswer",
+    "messageCaptchaPassed": "TODO messageCaptchaPassed",
+    "messageCaptchaExpired": "TODO messageCaptchaExpired",
+
+    "_comment_joinRequestCaptcha": "TODO(join-request-captcha agent): fill in real copy, this is a placeholder reservation",
+    "joinRequestCaptchaDm": "TODO joinRequestCaptchaDm",
+    "joinRequestCaptchaApproved": "TODO joinRequestCaptchaApproved",
+    "joinRequestCaptchaExpired": "TODO joinRequestCaptchaExpired",
+    "joinRequestCaptchaToggleUsage": "TODO joinRequestCaptchaToggleUsage",
+
+    "_comment_channelGate": "TODO(channel-gate agent): fill in real copy, this is a placeholder reservation",
+    "channelGateOwnerPrompt": "TODO channelGateOwnerPrompt",
+    "channelGatePromoPrompt": "TODO channelGatePromoPrompt",
+    "channelGateBothPrompt": "TODO channelGateBothPrompt",
+    "channelGateJoinButton": "TODO channelGateJoinButton",
+    "channelGateRecheckButton": "TODO channelGateRecheckButton",
+    "channelGateStillNotSubscribed": "TODO channelGateStillNotSubscribed",
+    "channelGateSetupUsage": "TODO channelGateSetupUsage",
+    "channelGateSetupSaved": "TODO channelGateSetupSaved",
+    "channelGateSetupInvalid": "TODO channelGateSetupInvalid",
+
+    "_comment_support": "TODO(support-relay agent): fill in real copy, this is a placeholder reservation",
+    "supportEntryButton": "TODO supportEntryButton",
+    "supportDmPrompt": "TODO supportDmPrompt",
+    "supportSent": "TODO supportSent",
+    "supportCooldown": "TODO supportCooldown",
+    "supportReplyPrefix": "TODO supportReplyPrefix"
   },
   "miniapp": {
     "dashboardTitle": "Мои группы",

@@ -25,7 +25,11 @@ export type ReasonTag =
 
 export type PlanTier = "free" | "pro";
 
-export type CaptchaType = "button" | "math" | "rules";
+/** "message" (type the shown word back, collected in **private chat** via a
+ * deep link — the member is muted in-group, same as the other types, so the
+ * answer can never be typed in the group itself) joins the existing
+ * button/math/rules types. See lib/telegram/messageCaptcha.ts. */
+export type CaptchaType = "button" | "math" | "rules" | "message";
 
 export interface GroupSettings {
   chatId: number;
@@ -126,6 +130,36 @@ export interface GroupSettings {
    * digest hour/day match would get re-sent every hour for the rest of that
    * hour's minute-0 window, and again on any redeploy/retry within the month. */
   lastDigestSentMonth: string | null;
+
+  /** Opt-in: requires a captcha to be answered from the Telegram side BEFORE a
+   * join-request-mode group approves the request at all (Bot API 10.1
+   * answerChatJoinRequestQuery family), instead of the existing post-join
+   * mute-then-captcha flow. Deliberately opt-in and additive — the existing
+   * `chat_join_request` handler (bot.ts) leaves non-flagged requests pending
+   * on purpose so manual-vetting groups keep control; this must never
+   * auto-approve a request the admin hasn't effectively vetted via the
+   * captcha, and must never touch requests when the flag is off. */
+  joinRequestCaptchaEnabled: boolean;
+
+  /** Force-sub gate to a channel of the GROUP OWNER'S OWN choosing (not this
+   * bot's channel — see promoChannelOptIn for that). Null username/id means
+   * "configured off" even if the boolean below is left on from a stale UI
+   * state; both are checked together. */
+  ownerChannelGateEnabled: boolean;
+  /** Numeric chat id of the owner's channel, resolved once (via getChat) when
+   * the owner sets the @username below, so per-message checks never need to
+   * resolve a username — same reasoning as caching in getCachedMemberCount. */
+  ownerChannelId: number | null;
+  /** The @username as entered by the owner, kept only for display in the Mini
+   * App / settings text — membership checks use ownerChannelId. */
+  ownerChannelUsername: string | null;
+
+  /** Opt-in "помочь проекту" toggle: when true, ALSO gates on subscription to
+   * this bot's own promo channel (@tovus_antispam), on top of (or instead of)
+   * ownerChannelGateEnabled. Off by default — MONETIZATION.md explicitly
+   * rejects in-group advertising as a default; this only ever runs because an
+   * owner opted in, never silently. */
+  promoChannelOptIn: boolean;
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -164,6 +198,11 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   referredBy: null,
   monthlyDigestEnabled: true,
   lastDigestSentMonth: null,
+  joinRequestCaptchaEnabled: false,
+  ownerChannelGateEnabled: false,
+  ownerChannelId: null,
+  ownerChannelUsername: null,
+  promoChannelOptIn: false,
 };
 
 export interface JournalEntry {

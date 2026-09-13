@@ -1,5 +1,6 @@
 import type { Message, MessageEntity } from "grammy/types";
 import { CTA_PHRASES, DANGEROUS_FILE_EXTENSIONS, DANGEROUS_MIME_TYPES } from "./spamDict";
+import { normalizeMessageText } from "./normalize";
 
 // Pure, Redis-free text/entity helpers shared by spam.ts (the live binary
 // detector) and scoring.ts (the §4 shadow scorer, which re-runs the same
@@ -26,6 +27,28 @@ export function extractLinks(text: string, entities: MessageEntity[] | undefined
     const urlRegex = /(https?:\/\/|t\.me\/|www\.)[^\s]+/gi;
     for (const match of text.matchAll(urlRegex)) {
       links.push(match[0]);
+    }
+  }
+  return Array.from(new Set(links.map((l) => l.toLowerCase())));
+}
+
+/**
+ * Links inside a message's own inline-keyboard buttons (`{ url: ... }`) —
+ * distinct from extractLinks, which only ever reads message text/entities.
+ * Ordinary users can't attach a keyboard to their own text message, but a
+ * bot/channel *post* can (and channel posts are commonly copied/auto-forwarded
+ * into groups this way), and Telegram's Login/Web-App/callback button kinds
+ * carry no `url` at all — so this only ever picks up genuine link buttons.
+ * Real example: an "18+ content" ad post whose body text has no link at all,
+ * only three inline buttons ("Фото + видео смотреть", ...) each pointing at
+ * the actual funnel — a message the old link-only checks scored as clean.
+ */
+export function extractButtonLinks(message: Message): string[] {
+  const rows = message.reply_markup?.inline_keyboard ?? [];
+  const links: string[] = [];
+  for (const row of rows) {
+    for (const button of row) {
+      if ("url" in button && button.url) links.push(button.url);
     }
   }
   return Array.from(new Set(links.map((l) => l.toLowerCase())));
@@ -144,9 +167,16 @@ export function findDangerousFileTag(
   return null;
 }
 
+// NFKC first, not just .toLowerCase(): spam templates routinely use stylized
+// Unicode alphabets (mathematical bold/sans-serif, fullwidth, etc. — e.g.
+// "𝙀𝙉𝙄𝙉𝙂") specifically to dodge plain-substring dictionaries. Those
+// characters have no case mapping of their own, so .toLowerCase() alone
+// leaves them untouched and every phrase list below silently stops matching;
+// NFKC folds them back to plain ASCII first (verified empirically — see
+// normalize.test.ts), same normalization already used for fuzzy comparison.
 export function containsCta(text: string): boolean {
-  const lower = text.toLowerCase();
-  return CTA_PHRASES.some((phrase) => lower.includes(phrase));
+  const normalized = normalizeMessageText(text);
+  return CTA_PHRASES.some((phrase) => normalized.includes(phrase));
 }
 
 export function countMentions(entities: MessageEntity[] | undefined): number {

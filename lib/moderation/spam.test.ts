@@ -31,6 +31,21 @@ function quoteMsg(
   } as unknown as Message;
 }
 
+function msgWithButtons(
+  text: string | undefined,
+  buttonUrls: string[],
+  caption?: string
+): Message {
+  return {
+    message_id: 1,
+    date: 0,
+    chat: { id: 1, type: "supergroup", title: "t" },
+    text,
+    caption,
+    reply_markup: { inline_keyboard: [buttonUrls.map((url) => ({ text: "Open", url }))] },
+  } as unknown as Message;
+}
+
 function docMsg(document: Partial<NonNullable<Message["document"]>>, caption?: string): Message {
   return {
     message_id: 1,
@@ -363,5 +378,36 @@ describe("detectSpam", () => {
 
   it("does not flag a document with no file_name and a safe mime_type", () => {
     expect(detectSpam(docMsg({ mime_type: "application/pdf" })).matched).toBe(false);
+  });
+
+  it("flags a stylized-Unicode '18+ bio' ad even with no link/mention/forward (regression, 2026-09-13 real example)", () => {
+    const text =
+      "?𝙀𝙉𝙄𝙉𝙂 𝙄𝙎𝙈𝙄𝙈 Asilya 𝙈𝙀𝙉 18🔞🔞🔥 𝙔𝙊𝙎𝙃𝘿𝘼𝙈𝘼𝙉\n𝘽𝙄𝙊 𝙊'𝙏𝙄𝙉𝙂\n𝙑𝙄𝙍𝙏𝙐𝘼𝙇 𝙎𝙐𝙃𝘽𝘼𝙏🔞\n𝙄𝙎𝙎𝙄𝙌 𝙍𝘼𝙎𝙈𝙇𝘼𝙍🔞\n𝙄𝙎𝙎𝙄𝙌 𝙑𝙄𝘿𝙀𝙊𝙇𝘼𝙍🔞";
+    const result = detectSpam(msg(text));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+  });
+
+  it("still flags the same ad-scheme phrase in plain (non-stylized) text", () => {
+    const result = detectSpam(msg("Virtual suhbat, issiq videolar va issiq rasmlar — yozing!"));
+    expect(result.matched).toBe(true);
+  });
+
+  it("flags a blacklisted domain hidden in an inline-keyboard button with no link in the text itself (regression)", () => {
+    const result = detectSpam(msgWithButtons("Смотри фото и видео 🔥", ["https://bit.ly/abc123"]));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+    expect(result.reason).toContain("bit.ly");
+  });
+
+  it("flags an invite-link button even on a media post with no caption at all", () => {
+    const result = detectSpam(msgWithButtons(undefined, ["https://t.me/+aBcDeFgH12345"]));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+  });
+
+  it("does not flag an ordinary button link that isn't blacklisted/invite", () => {
+    const result = detectSpam(msgWithButtons("Подробнее ниже", ["https://example.com/info"]));
+    expect(result.matched).toBe(false);
   });
 });

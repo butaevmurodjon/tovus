@@ -33,7 +33,21 @@ interface CaptchaState {
    * verifyMessageCaptcha). The word itself is shown uppercase in the group
    * prompt; stored lowercase here so comparison is a single toLowerCase(). */
   word?: string;
+  /** Wrong tries so far for "math"/"message" — the only two types where a
+   * wrong guess is even possible ("button"/"rules" pass on any click). Starts
+   * at 0 in startCaptcha; each wrong guess increments it, and hitting
+   * MAX_CAPTCHA_ATTEMPTS kicks the member instead of leaving the same
+   * fixed-option keyboard (math) or an unlimited DM retry (message) up
+   * forever — a bot/human could otherwise just cycle every option or keep
+   * guessing until right. */
+  attempts: number;
 }
+
+/** Wrong guesses allowed before the member is kicked (not just re-muted) —
+ * "math" shows a *new* question after each miss (see verifyCaptcha) so this
+ * also bounds how many fixed 4-option boards the same member ever gets to
+ * exhaustively click through; "message" just counts DM misses. */
+export const MAX_CAPTCHA_ATTEMPTS = 3;
 
 function randomToken(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -77,6 +91,27 @@ export function randomWord(): string {
     out += WORD_ALPHABET[Math.floor(Math.random() * WORD_ALPHABET.length)];
   }
   return out;
+}
+
+/** Builds one math-captcha screen (prompt text + answer keyboard) — shared by
+ * startCaptcha (first question) and verifyCaptcha's retry path (a fresh
+ * question after each wrong guess, so the member can't just click through
+ * the same 4 fixed options). */
+function buildMathCaptchaScreen(
+  lang: Lang,
+  user: User,
+  token: string,
+  seconds: number,
+  attemptsLeft: number
+): { text: string; correctAnswer: number; inline_keyboard: { text: string; callback_data: string }[][] } {
+  const { a, b, correct, options: answerOptions } = randomMathQuestion();
+  const key = attemptsLeft < MAX_CAPTCHA_ATTEMPTS ? "bot.captchaMathPromptRetry" : "bot.captchaMathPrompt";
+  const text = t(lang, key, { user: mentionHtml(user), seconds, a, b, attemptsLeft });
+  const buttons = answerOptions.map((value) => ({
+    text: String(value),
+    callback_data: `cap:${user.id}:${token}:${value}`,
+  }));
+  return { text, correctAnswer: correct, inline_keyboard: [buttons.slice(0, 2), buttons.slice(2)] };
 }
 
 /** `?start=capdm_<chatId>` — opens the bot in a PRIVATE chat for the "message"
@@ -141,14 +176,10 @@ export async function startCaptcha(
   let inline_keyboard: ({ text: string; callback_data: string } | { text: string; url: string })[][];
 
   if (type === "math") {
-    const { a, b, correct, options: answerOptions } = randomMathQuestion();
-    correctAnswer = correct;
-    text = t(lang, "bot.captchaMathPrompt", { user: mentionHtml(user), seconds: timeoutSeconds, a, b });
-    const buttons = answerOptions.map((value) => ({
-      text: String(value),
-      callback_data: `cap:${user.id}:${token}:${value}`,
-    }));
-    inline_keyboard = [buttons.slice(0, 2), buttons.slice(2)];
+    const screen = buildMathCaptchaScreen(lang, user, token, timeoutSeconds, MAX_CAPTCHA_ATTEMPTS);
+    correctAnswer = screen.correctAnswer;
+    text = screen.text;
+    inline_keyboard = screen.inline_keyboard;
   } else if (type === "rules") {
     const rules = rulesText ? escapeHtml(rulesText) : t(lang, "bot.captchaRulesDefault");
     text = t(lang, "bot.captchaRulesPrompt", { user: mentionHtml(user), seconds: timeoutSeconds, rules });
@@ -183,12 +214,13 @@ export async function startCaptcha(
     type,
     correctAnswer,
     word: word?.toLowerCase(),
+    attempts: 0,
   };
   await redis.set(stateKey(chatId, user.id), state, { ex: timeoutSeconds });
   await redis.sadd(pendingSetKey(chatId), user.id);
 }
 
-export type VerifyResult = "ok" | "wrong-user" | "wrong-answer" | "expired-or-unknown";
+export type VerifyResult = "ok" | "wrong-user" | "wrong-answer" | "failed" | "expired-or-unknown";
 
 /** Restores full send permissions and deletes the group prompt — the one
  * side effect every captcha type ends with once it's actually resolved.
@@ -212,25 +244,74 @@ async function restoreFullPermissionsAndClearPrompt(api: Api, chatId: number, us
   await api.deleteMessage(chatId, promptMessageId).catch(() => {});
 }
 
+/** Kicks (ban + immediate unban, same as sweepExpiredCaptchas' timeout path) a
+ * member who exhausted their captcha attempts, clearing all captcha state so
+ * a re-join starts fresh rather than instantly re-tripping stale state. */
+async function kickForExhaustedAttempts(
+  api: Api,
+  chatId: number,
+  userId: number,
+  key: string,
+  promptMessageId: number
+): Promise<void> {
+  const redis = getRedis();
+  await Promise.all([redis.del(key), redis.srem(pendingSetKey(chatId), userId)]);
+  await api.deleteMessage(chatId, promptMessageId).catch(() => {});
+  await api.banChatMember(chatId, userId).catch(() => {});
+  await api.unbanChatMember(chatId, userId, { only_if_banned: true }).catch(() => {});
+}
+
 /** Restores full permissions and clears the prompt once the right user clicks the
  * right button — for "math", `answer` must match the stored correct value; for
- * "button" it's ignored (any click from the right user passes, as before). */
+ * "button" it's ignored (any click from the right user passes, as before). A
+ * wrong "math" guess doesn't just re-show the same 4 options (previously
+ * lettng anyone pass by clicking every option in turn — a guaranteed win,
+ * not a 25% chance): it burns an attempt, shows a brand-new question with
+ * fresh numbers/options, and after MAX_CAPTCHA_ATTEMPTS wrong guesses kicks
+ * the member instead of leaving the board up forever. */
 export async function verifyCaptcha(
   api: Api,
   chatId: number,
-  clickingUserId: number,
+  clickingUser: User,
   targetUserId: number,
   token: string,
-  answer?: number
+  answer: number | undefined,
+  lang: Lang
 ): Promise<VerifyResult> {
+  const clickingUserId = clickingUser.id;
   if (clickingUserId !== targetUserId) return "wrong-user";
 
   const redis = getRedis();
-  const state = await redis.get<CaptchaState>(stateKey(chatId, targetUserId));
+  const key = stateKey(chatId, targetUserId);
+  const state = await redis.get<CaptchaState>(key);
   if (!state || state.token !== token) return "expired-or-unknown";
-  if (state.type === "math" && state.correctAnswer !== answer) return "wrong-answer";
 
-  await Promise.all([redis.del(stateKey(chatId, targetUserId)), redis.srem(pendingSetKey(chatId), targetUserId)]);
+  if (state.type === "math" && state.correctAnswer !== answer) {
+    const attempts = (state.attempts ?? 0) + 1;
+    if (attempts >= MAX_CAPTCHA_ATTEMPTS) {
+      await kickForExhaustedAttempts(api, chatId, targetUserId, key, state.promptMessageId);
+      return "failed";
+    }
+
+    const ttl = await redis.ttl(key);
+    const secondsLeft = ttl && ttl > 0 ? ttl : 60;
+    const attemptsLeft = MAX_CAPTCHA_ATTEMPTS - attempts;
+    const screen = buildMathCaptchaScreen(lang, clickingUser, token, secondsLeft, attemptsLeft);
+    await api
+      .editMessageText(chatId, state.promptMessageId, screen.text, {
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: screen.inline_keyboard },
+      })
+      .catch(() => {});
+    await redis.set(
+      key,
+      { ...state, correctAnswer: screen.correctAnswer, attempts },
+      { ex: secondsLeft }
+    );
+    return "wrong-answer";
+  }
+
+  await Promise.all([redis.del(key), redis.srem(pendingSetKey(chatId), targetUserId)]);
   await restoreFullPermissionsAndClearPrompt(api, chatId, targetUserId, state.promptMessageId);
 
   return "ok";

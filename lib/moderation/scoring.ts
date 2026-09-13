@@ -13,6 +13,7 @@ import {
 import {
   containsCta,
   countMentions,
+  extractButtonLinks,
   extractLinks,
   extractQuote,
   findCloakedBotLink,
@@ -20,6 +21,7 @@ import {
   findMaskedLinkHost,
   hostnameOf,
 } from "./textSignals";
+import { normalizeMessageText } from "./normalize";
 import { isNightModeActive } from "./nightMode";
 import { buildAllowlistMatcher } from "./allowlist";
 import { getAllowlist } from "@/lib/db/allowlist";
@@ -102,7 +104,9 @@ export function collectSpamSignals(message: Message, allowlist: string[] = []): 
   // the time §11.3 promotes it toward gating real actions.
   const quote = extractQuote(message);
   if (quote) {
-    const quoteLower = quote.text.toLowerCase();
+    // NFKC first — see textSignals.ts's containsCta comment: stylized Unicode
+    // alphabets have no case mapping, so plain .toLowerCase() misses them.
+    const quoteLower = normalizeMessageText(quote.text);
     const quoteScamPattern = SCAM_PATTERNS.find(
       (phrase) => quoteLower.includes(phrase) && !allow.allowsPhrase(phrase)
     );
@@ -131,18 +135,31 @@ export function collectSpamSignals(message: Message, allowlist: string[] = []): 
     }
   }
 
+  // Button links checked even when there's no text/caption at all (media post +
+  // link buttons, nothing else) — mirrors spam.ts's identical restructuring.
+  const buttonLinks = extractButtonLinks(message);
+  for (const link of buttonLinks) {
+    const host = hostnameOf(link);
+    if (allow.allowsLink(link)) continue;
+    if (host && DOMAIN_BLACKLIST.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
+      signals.push({ name: "button_blacklisted_domain", weight: 85, evidence: host, group: "link-risk" });
+      break;
+    }
+  }
+
   const text = message.text ?? message.caption ?? "";
   if (!text) return signals;
   const entities = message.entities ?? message.caption_entities;
 
+  const normalizedText = normalizeMessageText(text);
   const scamPattern = SCAM_PATTERNS.find(
-    (phrase) => text.toLowerCase().includes(phrase) && !allow.allowsPhrase(phrase)
+    (phrase) => normalizedText.includes(phrase) && !allow.allowsPhrase(phrase)
   );
   if (scamPattern) {
     signals.push({ name: "scam_pattern", weight: 90, evidence: scamPattern, group: "link-risk" });
   }
 
-  const allLinks = extractLinks(text, entities);
+  const allLinks = Array.from(new Set([...extractLinks(text, entities), ...buttonLinks]));
   const links = allow.empty ? allLinks : allLinks.filter((l) => !allow.allowsLink(l));
 
   const maskedHost = findMaskedLinkHost(text, entities);

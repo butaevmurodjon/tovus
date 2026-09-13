@@ -142,6 +142,23 @@ export const SCAM_PATTERNS: string[] = [
   "реклама роликларини кўриш",
   "шарҳ ёзиб пул топиш",
   "яндекс харитага шарҳ ёзиш",
+  // "18+ bio/OnlyFans-style" sexual-content ad template, uz-latin — this
+  // category previously had no message-text coverage at all (SCAM_PROFILE_MARKERS
+  // below only checks a *joining member's* name/bio, never an ordinary chat
+  // message), so a pure-text ad with no link/mention/forward sailed straight
+  // through detectSpam. Real example (2026-09-13, no NFKC normalization
+  // needed to reproduce — plain text): "...ENING ISMIM Asilya MEN 18...
+  // YOSHDAMAN BIO O'TING U ERDA SIZ KO'RISHINGIZ MUMKIN VIRTUAL SUHBAT
+  // ISSIQ VIDEOLAR ISSIQ RASMLAR...". Kept to the distinctive
+  // "18+ содержимого" phrasing, not bare words like "фото"/"видео" which are
+  // ordinary chat vocabulary.
+  "yalang'och kontent",
+  "yalangoch kontent",
+  "shaxsiy fotolarim",
+  "shaxsiy fotolar",
+  "issiq videolar",
+  "issiq rasmlar",
+  "virtual suhbat",
 ];
 
 /**

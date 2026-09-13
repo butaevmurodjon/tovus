@@ -344,13 +344,25 @@ export function getBot(): Bot {
     const settings = await getGroupSettings(chat.id);
     const lang = settings?.lang ?? detectLang(ctx.callbackQuery.from.language_code);
 
-    const result = await verifyCaptcha(ctx.api, chat.id, ctx.callbackQuery.from.id, targetUserId, token, answer);
+    const result = await verifyCaptcha(
+      ctx.api,
+      chat.id,
+      ctx.callbackQuery.from,
+      targetUserId,
+      token,
+      answer,
+      lang
+    );
     if (result === "wrong-user") {
       await ctx.answerCallbackQuery({ text: t(lang, "bot.captchaWrongUser"), show_alert: true });
       return;
     }
     if (result === "wrong-answer") {
       await ctx.answerCallbackQuery({ text: t(lang, "bot.captchaWrongAnswer"), show_alert: true });
+      return;
+    }
+    if (result === "failed") {
+      await ctx.answerCallbackQuery({ text: t(lang, "bot.captchaKicked"), show_alert: true });
       return;
     }
     await ctx.answerCallbackQuery();

@@ -3,6 +3,7 @@ import { DOMAIN_BLACKLIST, LINK_COUNT_THRESHOLD, MENTION_COUNT_THRESHOLD, QUOTE_
 import {
   containsCta,
   countMentions,
+  extractButtonLinks,
   extractLinks,
   extractQuote,
   findCloakedBotLink,
@@ -11,6 +12,7 @@ import {
   hostnameOf,
 } from "./textSignals";
 import { buildAllowlistMatcher } from "./allowlist";
+import { normalizeMessageText } from "./normalize";
 
 export interface SpamResult {
   matched: boolean;
@@ -38,7 +40,10 @@ export function detectSpam(message: Message, allowlist: string[] = []): SpamResu
   // below are even read, since a quote can exist independent of them.
   const quote = extractQuote(message);
   if (quote) {
-    const quoteLower = quote.text.toLowerCase();
+    // NFKC before matching — see containsCta's comment in textSignals.ts:
+    // stylized Unicode alphabets (mathematical bold, fullwidth, ...) have no
+    // case mapping, so plain .toLowerCase() leaves them unmatched.
+    const quoteLower = normalizeMessageText(quote.text);
     const quoteSource = quote.isExternal ? " из другого чата/канала" : "";
 
     const quoteScamPattern = SCAM_PATTERNS.find(
@@ -87,6 +92,22 @@ export function detectSpam(message: Message, allowlist: string[] = []): SpamResu
 
   const text = message.text ?? message.caption ?? "";
   const entities = message.entities ?? message.caption_entities;
+
+  // Checked before the `!text` early-return below: a media post can carry an
+  // inline keyboard with no caption at all (photo + "Открыть"-style buttons,
+  // nothing else), and those button URLs are exactly as much a blacklisted-
+  // domain/invite-link risk as one typed into the message text.
+  for (const link of extractButtonLinks(message)) {
+    if (allow.allowsLink(link)) continue;
+    const host = hostnameOf(link);
+    if (host && DOMAIN_BLACKLIST.some((domain) => host === domain || host.endsWith(`.${domain}`))) {
+      return { matched: true, reason: `запрещённый домен в кнопке: ${host}`, severity: "high" };
+    }
+    if (/^t\.me\/(joinchat|\+)/i.test(link.replace(/^https?:\/\//, ""))) {
+      return { matched: true, reason: "ссылка-приглашение в кнопке сообщения", severity: "high" };
+    }
+  }
+
   if (!text) return { matched: false };
 
   // Strong standalone scam-scheme phrases ("мошеннические схемы") — job-scam
@@ -96,8 +117,9 @@ export function detectSpam(message: Message, allowlist: string[] = []): SpamResu
   // applyViolation) instead of slipping through because it had no URL. Kept as
   // specific multi-word phrases — bare terms like "ищем работников" or "ставка
   // за час" are legitimate job-ad vocabulary and must not trip this.
+  const normalizedText = normalizeMessageText(text);
   const scamPattern = SCAM_PATTERNS.find(
-    (phrase) => text.toLowerCase().includes(phrase) && !allow.allowsPhrase(phrase)
+    (phrase) => normalizedText.includes(phrase) && !allow.allowsPhrase(phrase)
   );
   if (scamPattern) {
     return { matched: true, reason: `скам-схема: ${scamPattern}`, severity: "high" };
@@ -106,7 +128,11 @@ export function detectSpam(message: Message, allowlist: string[] = []): SpamResu
   // Links to an allowlisted host don't count toward any link-based signal
   // (blacklist, invite, count, link+CTA) — suppress the signal, not the whole
   // verdict, so an allowlisted domain can't be used to smuggle other spam.
-  const allLinks = extractLinks(text, entities);
+  // Includes the message's own inline-keyboard button URLs (extractButtonLinks)
+  // alongside text/entity links — an ad post with no link in its text at all,
+  // only "Открыть"-style buttons pointing at the funnel, used to score as
+  // clean (real example: a "18+ content" post, 3 buttons, zero links in text).
+  const allLinks = Array.from(new Set([...extractLinks(text, entities), ...extractButtonLinks(message)]));
   const links = allow.empty ? allLinks : allLinks.filter((l) => !allow.allowsLink(l));
 
   const maskedHost = findMaskedLinkHost(text, entities);

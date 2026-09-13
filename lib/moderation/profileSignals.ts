@@ -1,6 +1,7 @@
 import type { User } from "grammy/types";
 import { detectProfanity } from "./profanity";
 import { SCAM_PROFILE_MARKERS } from "./spamDict";
+import { normalizeMessageText } from "./normalize";
 
 /**
  * Text-only half of the "bad name/username/avatar" question — see
@@ -52,7 +53,12 @@ function matchScamOrProfanity(text: string, label: "имя/юзернейм" | "
     return `${label} с нецензурной лексикой`;
   }
 
-  const lower = text.toLowerCase();
+  // NFKC first, not just .toLowerCase() — see textSignals.ts's containsCta
+  // comment: bios/display names built from stylized Unicode alphabets
+  // (mathematical bold, fullwidth, ...) have no case mapping, so plain
+  // lowercasing leaves them unmatched against SCAM_PROFILE_MARKERS. Real
+  // example: a "18+ bio" join whose entire bio text used this styling.
+  const lower = normalizeMessageText(text);
   if (SCAM_PROFILE_MARKERS.some((marker) => lower.includes(marker))) {
     return `${label} похоже на скам- или интим-предложение`;
   }

@@ -40,6 +40,7 @@ import { displayName } from "./format";
 import { isSupportOnCooldown, tryStartSupportCooldown } from "@/lib/db/supportTickets";
 import { ownerId } from "@/lib/owner";
 import { parseSupportPayload, relayOwnerReply, sendSupportTicketToOwner } from "./support";
+import { getUserAdminGroupIds } from "@/lib/db/admins";
 
 function miniAppButtonUrl(startParam: string): string | null {
   const username = process.env.TELEGRAM_BOT_USERNAME;
@@ -179,6 +180,26 @@ export function registerCommands(bot: Bot): void {
         }
         await setPendingAppeal(ctx.from.id, appealChatId);
         await ctx.reply(t(group.lang, "bot.appealPrompt", { title: group.title }));
+        return;
+      }
+
+      // Group-less "Связь с поддержкой" button attached to the owner's
+      // broadcastToAdmins message (lib/telegram/broadcast.ts) — no specific
+      // group in the payload, so admin status is checked against ANY group
+      // rather than one particular chat. Checked before the per-group
+      // support_<groupId> branch below since "support" itself would also
+      // fail that branch's regex (it only matches "support_<digits>").
+      if (payload === "support" && ctx.from) {
+        if ((await getUserAdminGroupIds(ctx.from.id)).length === 0) {
+          await ctx.reply(t(lang, "bot.notAdminCommand"));
+          return;
+        }
+        if (await isSupportOnCooldown(ctx.from.id)) {
+          await ctx.reply(t(lang, "bot.supportCooldown"));
+          return;
+        }
+        await setPendingAction(ctx.from.id, "support", { groupId: null }, 30 * 60);
+        await ctx.reply(t(lang, "bot.supportDmPromptGeneric"));
         return;
       }
 
@@ -943,15 +964,29 @@ export function registerCommands(bot: Bot): void {
     if (!pending || pending.kind !== "support") return next();
 
     await clearPendingActionIfKind(ctx.from.id, "support");
-    const { groupId } = pending.payload as { groupId: number };
-    const group = await getGroupSettings(groupId);
-    const lang = group?.lang ?? detectLang(ctx.from.language_code);
-    if (!group) return ctx.reply(t(lang, "bot.appealGroupUnavailable"));
+    const { groupId } = pending.payload as { groupId: number | null };
 
-    // Re-verify admin status at submit time, not just at /start time — an
-    // admin demoted in between shouldn't still get a ticket through.
-    if (!(await isChatAdmin(ctx.api, groupId, ctx.from.id))) {
-      return ctx.reply(t(lang, "bot.notAdminCommand"));
+    // groupId === null: the group-less broadcastToAdmins entry point
+    // (payload === "support", no specific chat) — re-verify "still admin of
+    // SOME group" instead of "still admin of THAT group", since there isn't
+    // one. Otherwise unchanged: same per-group lookup/re-verify as before.
+    let group: Awaited<ReturnType<typeof getGroupSettings>> = null;
+    let lang: Lang;
+    if (groupId === null) {
+      lang = detectLang(ctx.from.language_code);
+      if ((await getUserAdminGroupIds(ctx.from.id)).length === 0) {
+        return ctx.reply(t(lang, "bot.notAdminCommand"));
+      }
+    } else {
+      group = await getGroupSettings(groupId);
+      lang = group?.lang ?? detectLang(ctx.from.language_code);
+      if (!group) return ctx.reply(t(lang, "bot.appealGroupUnavailable"));
+
+      // Re-verify admin status at submit time, not just at /start time — an
+      // admin demoted in between shouldn't still get a ticket through.
+      if (!(await isChatAdmin(ctx.api, groupId, ctx.from.id))) {
+        return ctx.reply(t(lang, "bot.notAdminCommand"));
+      }
     }
 
     if (!(await tryStartSupportCooldown(ctx.from.id))) {
@@ -961,7 +996,7 @@ export function registerCommands(bot: Bot): void {
     const text = ctx.message.text.slice(0, 2000);
     const ticket = await sendSupportTicketToOwner(ctx.api, ownerId(), {
       groupId,
-      groupTitle: group.title,
+      groupTitle: group?.title ?? null,
       fromUserId: ctx.from.id,
       fromUsername: ctx.from.username ?? null,
       fromDisplayName: displayName(ctx.from),

@@ -48,4 +48,9 @@ describe("supportUrl", () => {
     delete process.env.TELEGRAM_BOT_USERNAME;
     expect(supportUrl(-100123)).toBeNull();
   });
+
+  it("builds a bare start=support deep link when no groupId is given (broadcastToAdmins button)", () => {
+    process.env.TELEGRAM_BOT_USERNAME = "TovusBot";
+    expect(supportUrl()).toBe("https://t.me/TovusBot?start=support");
+  });
 });

@@ -18,10 +18,13 @@ import { t, type Lang } from "@/lib/i18n";
  * supportTickets.ts's durable, bot-wide, reply-routable list).
  */
 
-export function supportUrl(groupId: number): string | null {
+/** Omit `groupId` for a group-less entry point — used by the owner's
+ * "Рассылка админам" (broadcastToAdmins) button, where the recipient may
+ * administer several groups and the ticket isn't about any one of them. */
+export function supportUrl(groupId?: number): string | null {
   const username = process.env.TELEGRAM_BOT_USERNAME;
   if (!username) return null;
-  return `https://t.me/${username}?start=support_${groupId}`;
+  return groupId === undefined ? `https://t.me/${username}?start=support` : `https://t.me/${username}?start=support_${groupId}`;
 }
 
 /** `support_<groupId>` from a `?start=` payload — groupId is a Telegram
@@ -36,8 +39,10 @@ export function parseSupportPayload(payload: string | undefined | null): number 
 }
 
 export interface SendTicketInput {
-  groupId: number;
-  groupTitle: string;
+  /** Null for a ticket opened via the group-less broadcast entry point —
+   * see SupportTicket's doc comment in lib/db/types.ts. */
+  groupId: number | null;
+  groupTitle: string | null;
   fromUserId: number;
   fromUsername: string | null;
   fromDisplayName: string;
@@ -50,9 +55,10 @@ export interface SendTicketInput {
  * sender their message could not be delivered rather than claiming success. */
 export async function sendSupportTicketToOwner(api: Api, ownerUserId: number, input: SendTicketInput): Promise<SupportTicket | null> {
   const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const groupLine = input.groupId !== null ? `Группа: ${input.groupTitle} (id${input.groupId})\n` : "";
   const header =
     `🆘 Обращение от владельца группы\n` +
-    `Группа: ${input.groupTitle} (id${input.groupId})\n` +
+    groupLine +
     `От: ${input.fromDisplayName}${input.fromUsername ? ` (@${input.fromUsername})` : ""} (id${input.fromUserId})\n\n` +
     input.text;
 
@@ -105,7 +111,11 @@ export async function relayOwnerReply(
   if (!ticket) return "no-ticket";
 
   try {
-    await api.sendMessage(ticket.fromUserId, t(lang, "bot.supportReplyPrefix", { title: ticket.groupTitle }) + "\n\n" + text);
+    const prefix =
+      ticket.groupTitle !== null
+        ? t(lang, "bot.supportReplyPrefix", { title: ticket.groupTitle })
+        : t(lang, "bot.supportReplyPrefixGeneric");
+    await api.sendMessage(ticket.fromUserId, prefix + "\n\n" + text);
   } catch (err) {
     if (err instanceof GrammyError) return "delivery-failed";
     throw err;

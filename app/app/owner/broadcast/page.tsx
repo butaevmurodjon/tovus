@@ -4,7 +4,10 @@ import { useState } from "react";
 import { useApp } from "@/contexts/AppProvider";
 import { Card, CardSection } from "@/components/Card";
 import { Button } from "@/components/Button";
+import { SegmentedControl } from "@/components/SegmentedControl";
 import { confirmAction, haptic, hapticNotify } from "@/lib/miniapp/telegram";
+
+type BroadcastTarget = "groups" | "admins";
 
 interface BroadcastResult {
   total: number;
@@ -15,6 +18,7 @@ interface BroadcastResult {
 export default function OwnerBroadcastPage() {
   const { t, fetcher } = useApp();
   const [text, setText] = useState("");
+  const [target, setTarget] = useState<BroadcastTarget>("groups");
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<BroadcastResult | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -27,7 +31,9 @@ export default function OwnerBroadcastPage() {
   async function send() {
     const trimmed = text.trim();
     if (!trimmed) return;
-    const confirmed = await confirmAction(t("miniapp.ownerBroadcastConfirm"));
+    const confirmed = await confirmAction(
+      t(target === "admins" ? "miniapp.ownerBroadcastConfirmAdmins" : "miniapp.ownerBroadcastConfirm")
+    );
     if (!confirmed) return;
 
     haptic("medium");
@@ -36,7 +42,7 @@ export default function OwnerBroadcastPage() {
     try {
       const data = await fetcher<BroadcastResult>("/api/miniapp/owner/broadcast", {
         method: "POST",
-        body: JSON.stringify({ text: trimmed }),
+        body: JSON.stringify({ text: trimmed, target }),
       });
       setResult(data);
       hapticNotify("success");
@@ -61,13 +67,25 @@ export default function OwnerBroadcastPage() {
       )}
 
       <Card>
-        <CardSection title={t("miniapp.ownerBroadcastTitle")} subtitle={t("miniapp.ownerBroadcastHint")}>
+        <CardSection
+          title={t("miniapp.ownerBroadcastTitle")}
+          subtitle={t(target === "admins" ? "miniapp.ownerBroadcastHintAdmins" : "miniapp.ownerBroadcastHint")}
+        >
+          <SegmentedControl
+            value={target}
+            onChange={(v) => setTarget(v as BroadcastTarget)}
+            columns={2}
+            options={[
+              { value: "groups", label: t("miniapp.ownerBroadcastTargetGroups") },
+              { value: "admins", label: t("miniapp.ownerBroadcastTargetAdmins") },
+            ]}
+          />
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder={t("miniapp.ownerBroadcastPlaceholder")}
             rows={5}
-            className="w-full rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border resize-none"
+            className="w-full mt-3 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border resize-none"
             style={{ borderColor: "var(--border-strong)" }}
           />
           <div className="mt-3">

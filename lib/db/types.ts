@@ -390,8 +390,12 @@ export interface AppealEntry {
  */
 export interface SupportTicket {
   id: string;
-  groupId: number;
-  groupTitle: string;
+  /** Null when opened from the group-less broadcast "Связь с поддержкой"
+   * button (lib/telegram/broadcast.ts's broadcastToAdmins) rather than a
+   * per-group Mini App link — the admin is reaching out generally, not
+   * about one specific group. */
+  groupId: number | null;
+  groupTitle: string | null;
   fromUserId: number;
   fromUsername: string | null;
   fromDisplayName: string;

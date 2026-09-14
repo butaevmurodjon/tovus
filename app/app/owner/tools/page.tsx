@@ -5,6 +5,7 @@ import { useApp } from "@/contexts/AppProvider";
 import { Card, CardSection } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { Badge } from "@/components/Badge";
+import { Toggle } from "@/components/Toggle";
 import { confirmAction, haptic, hapticNotify } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
 import { ownerActionErrorText } from "@/lib/miniapp/ownerActionErrorText";
@@ -36,6 +37,29 @@ export default function OwnerToolsPage() {
   function flash(text: string) {
     setToast(text);
     setTimeout(() => setToast((cur) => (cur === text ? null : cur)), 2600);
+  }
+
+  // --- Section: owner-only reminder notes ---------------------------------
+  // Sticky checklist items, not functional controls — see lib/db/ownerReminders.ts.
+  // First entry: don't forget to add encryption-at-rest for the daily-summary
+  // buffer if its 48h retention window ever gets extended (2026-09-14 decision:
+  // keep it short-lived for now, see PRIVACY.md).
+  const [reminders, setReminders] = useState<Record<string, boolean> | null>(null);
+  useEffect(() => {
+    fetcher<{ reminders: Record<string, boolean> }>("/api/miniapp/owner/reminders")
+      .then((res) => setReminders(res.reminders))
+      .catch(() => setReminders({}));
+  }, [fetcher]);
+
+  async function toggleReminder(id: string, value: boolean) {
+    haptic("light");
+    setReminders((cur) => ({ ...cur, [id]: value }));
+    try {
+      await fetcher("/api/miniapp/owner/reminders", { method: "POST", body: JSON.stringify({ id, value }) });
+    } catch {
+      hapticNotify("error");
+      flash("Не удалось сохранить напоминание.");
+    }
   }
 
   // --- Section A: message-link / username resolver -----------------------
@@ -375,6 +399,23 @@ export default function OwnerToolsPage() {
                 </Button>
               </div>
             ))}
+          </div>
+        </CardSection>
+      </Card>
+
+      <Card>
+        <CardSection title="Напоминалки">
+          <p className="text-[12px] mb-3" style={{ color: "var(--ink-muted)" }}>
+            Просто заметки для себя — переключение тумблера ничего не делает в коде, это не функциональная настройка. Видно только владельцу бота.
+          </p>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[13px] max-w-[75%]">
+              Добавить шифрование at rest для буфера ежедневной ИИ-сводки, если срок хранения (сейчас 48ч) когда-нибудь увеличится
+            </span>
+            <Toggle
+              checked={reminders?.["daily-summary-encryption"] ?? false}
+              onChange={(v) => toggleReminder("daily-summary-encryption", v)}
+            />
           </div>
         </CardSection>
       </Card>

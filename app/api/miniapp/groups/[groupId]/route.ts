@@ -139,14 +139,6 @@ export async function PATCH(
   // the (currently unused elsewhere) logChannelId convention already expects.
   if (channelGateError) rejected.push("ownerChannelUsername");
 
-  // dailySummaryEnabled's OTHER gate (dailySummaryOwnerAllowed) is owner-only
-  // and not eligibility-based, so it can't share the Pro gateKeys loop above —
-  // rejected the same way: a group admin can't turn this on until the bot
-  // owner has granted it for that specific group.
-  if (patch.dailySummaryEnabled === true && !settings.dailySummaryOwnerAllowed) {
-    rejected.push("dailySummaryEnabled");
-  }
-
   // Strip the rejected keys so an ineligible group can't persist a Pro toggle
   // through the Mini App — the chat commands already prevent this by gating
   // before `updateGroupSettings`. Matters for `federationEnabled`: federation.ts

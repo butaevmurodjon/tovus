@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getApi } from "@/lib/telegram/api";
 import { getGroupSettings, listAllGroupIds, updateGroupSettings } from "@/lib/db/groups";
 import { getDailySummaryMessages, utcDateBucket } from "@/lib/db/dailySummaryBuffer";
+import { getOrCreateHubTopic } from "@/lib/db/digestHub";
+import { getStats, getActivity } from "@/lib/db/stats";
 import { summarizeDailyChat } from "@/lib/moderation/deepseek";
 import { t } from "@/lib/i18n";
 
@@ -10,31 +12,55 @@ export const maxDuration = 60;
 
 type GroupOutcome = "sent" | "skipped" | "failed";
 
+function buildDigestMessage(title: string, stats: { messages: number; joins: number; violations: number }, aiSummary: string | null, lang: import("@/lib/i18n").Lang): string {
+  const header = `${t(lang, "bot.dailySummaryHeader")} — ${title}`;
+  const statsLine = t(lang, "bot.dailySummaryStatsLine", {
+    messages: stats.messages,
+    joins: stats.joins,
+    violations: stats.violations,
+  });
+  const body = aiSummary ?? t(lang, "bot.dailySummaryNoAiText");
+  return `${header}\n\n${statsLine}\n\n${body}`;
+}
+
 /**
- * ROADMAP.md §7.3 "Ежедневная ИИ-сводка чата". Both
- * dailySummaryEnabled (group admin) AND dailySummaryOwnerAllowed (bot
- * owner, per group — /api/miniapp/owner/groups/[groupId]/dailysummary)
- * must be on; either one off is a silent skip, same as monthly-digest's
- * own gate. Summarizes TODAY's UTC bucket (this cron is the only reader of
- * dailySummaryBuffer.ts, and runs once near the end of the UTC day — see
- * vercel.json's schedule) rather than "yesterday", so the digest covers
- * the day that's actually ending, not a full day's lag behind.
+ * ROADMAP.md §7.3 "Ежедневная ИИ-сводка чата", 2026-09-14 re-cut — owner-only
+ * now (`dailySummaryOwnerAllowed`, no group-admin toggle any more), and
+ * posts to a separate hub supergroup (`DIGEST_HUB_CHAT_ID`) instead of the
+ * source group — one Forum topic per monitored group (lib/db/digestHub.ts).
+ * `DIGEST_HUB_CHAT_ID` unset = every group skips, feature fully inert.
+ *
+ * Combines two independent things into one message per group: the day's
+ * plain-number stats (always available, zero AI cost) and the qualitative
+ * AI summary (only when there was buffered text and DeepSeek succeeded —
+ * see buildDigestMessage's `aiSummary` fallback text for when it didn't).
  */
-async function processGroup(chatId: number, today: string): Promise<GroupOutcome> {
+async function processGroup(hubChatId: number, chatId: number, today: string): Promise<GroupOutcome> {
   const settings = await getGroupSettings(chatId);
   if (!settings) return "skipped";
-  if (!settings.dailySummaryEnabled || !settings.dailySummaryOwnerAllowed) return "skipped";
+  if (!settings.dailySummaryOwnerAllowed) return "skipped";
   if (settings.lastDailySummarySentDate === today) return "skipped";
 
-  const entries = await getDailySummaryMessages(chatId, today);
-  if (entries.length === 0) return "skipped";
+  const [violationStats, activity, entries] = await Promise.all([
+    getStats(chatId, "today"),
+    getActivity(chatId, "today"),
+    getDailySummaryMessages(chatId, today),
+  ]);
 
-  const summary = await summarizeDailyChat(entries, settings.lang);
-  if (!summary) return "skipped";
+  const aiSummary = entries.length > 0 ? await summarizeDailyChat(entries, settings.lang) : null;
+  const message = buildDigestMessage(
+    settings.title,
+    { messages: activity.messages, joins: activity.joins, violations: violationStats.total },
+    aiSummary,
+    settings.lang
+  );
 
-  const message = `${t(settings.lang, "bot.dailySummaryHeader")}\n\n${summary}`;
+  const api = getApi();
+  const threadId = await getOrCreateHubTopic(api, hubChatId, chatId, settings.title);
+  if (threadId === null) return "failed";
+
   try {
-    await getApi().sendMessage(chatId, message);
+    await api.sendMessage(hubChatId, message, { message_thread_id: threadId });
   } catch {
     return "failed";
   }
@@ -44,10 +70,9 @@ async function processGroup(chatId: number, today: string): Promise<GroupOutcome
 }
 
 /**
- * Same CRON_SECRET auth as monthly-digest (see that route's doc comment).
- * A separate cron entry in vercel.json — Vercel Hobby allows 2 daily cron
- * jobs total, so this fits alongside monthly-digest without needing to
- * merge the two into one function.
+ * Same CRON_SECRET auth as monthly-digest. A separate cron entry in
+ * vercel.json — Vercel Hobby allows 2 daily cron jobs total, this is the
+ * 2nd alongside monthly-digest.
  */
 export async function GET(req: Request) {
   const authHeader = req.headers.get("authorization");
@@ -56,13 +81,18 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
+  const hubChatId = Number(process.env.DIGEST_HUB_CHAT_ID);
+  if (!process.env.DIGEST_HUB_CHAT_ID || !Number.isFinite(hubChatId)) {
+    return NextResponse.json({ total: 0, sent: 0, skipped: 0, failed: 0, note: "DIGEST_HUB_CHAT_ID not configured" });
+  }
+
   const today = utcDateBucket();
   const chatIds = await listAllGroupIds();
 
   const outcomes = await Promise.all(
     chatIds.map(async (chatId): Promise<GroupOutcome> => {
       try {
-        return await processGroup(chatId, today);
+        return await processGroup(hubChatId, chatId, today);
       } catch {
         return "failed";
       }

@@ -32,18 +32,23 @@ this bot's token) is never shared with OCR.space. No separate retention beyond
 what OCR.space's own terms specify for the API call itself; this bot does not
 additionally store the photo.
 
-## Daily AI chat summary (optional, off by default, per-group owner approval required)
+## Daily AI chat summary (optional, off by default, bot-owner-only — no group-admin toggle)
 
-When a group admin enables `dailySummaryEnabled` **and** the bot owner has
-separately allowed it for that specific group, the bot buffers that day's
-message text (sender display name + text, capped in length and count) for up
-to 48 hours, sends it to the DeepSeek API once per day to generate a short
-summary, and posts the summary back to the group. The buffer is transient —
-capped and expiring automatically — not part of the longer-retention corpus
-below. This is a materially bigger single disclosure than the premium/OCR
-paths above (a whole day's conversation, not one message or photo at a time),
-which is why it requires the bot owner's explicit per-group approval on top of
-the group admin's own toggle, not just the admin's.
+The bot owner can allow this per group (there is no setting a group admin can
+turn on themselves — see 2026-09-14 re-cut). For an allowed group, the bot
+buffers that day's message text (sender display name + text, capped in length
+and count) for up to 48 hours and sends it to the DeepSeek API once per day to
+generate a short summary. The buffer is transient — capped and expiring
+automatically — not part of the longer-retention corpus below.
+
+Unlike every other data flow in this document, the result does **not** go
+back into the source group. It's posted into a separate hub supergroup the
+bot owner controls, in a dedicated Topic for that group — so the group's own
+members never see it, only whoever the bot owner has in that hub chat. This
+is a materially bigger single disclosure than the premium/OCR paths above (a
+whole day's conversation, not one message or photo at a time, summarized by
+an AI and read by someone who isn't a member of the group), which is why
+enabling it for a group is the bot owner's decision alone.
 
 ## Training-corpus collection (optional, off by default)
 

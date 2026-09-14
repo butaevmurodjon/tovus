@@ -908,11 +908,11 @@ export function getBot(): Bot {
           from.username
         ).catch(() => {})
       );
-      // §7.3 daily AI summary — both gates required (see GroupSettings'
-      // doc comment); a no-op read of two already-loaded booleans for every
-      // group that hasn't had both explicitly turned on.
+      // §7.3 daily AI summary — owner-only gate now (see GroupSettings'
+      // doc comment), a no-op read of one already-loaded boolean for every
+      // group the bot owner hasn't explicitly allowed.
       const summaryText = message.text ?? message.caption ?? "";
-      if (settings.dailySummaryEnabled && settings.dailySummaryOwnerAllowed && summaryText.trim()) {
+      if (settings.dailySummaryOwnerAllowed && summaryText.trim()) {
         sideEffects.push(
           appendDailySummaryMessage(chat.id, { displayName: displayName(from), text: summaryText }).catch(() => {})
         );

@@ -240,20 +240,16 @@ export interface GroupSettings {
    * everywhere else since the check requires `reply_to_message.is_automatic_forward`. */
   antiFirstCommentEnabled: boolean;
 
-  /** ROADMAP.md §7.3 "Ежедневная ИИ-сводка чата" — TWO independent gates,
-   * both required, on purpose. Sending a whole day's chat text to DeepSeek
-   * (not just one borderline message) is a materially bigger data-exposure
-   * step than anything else this bot does short of CORPUS_ENABLED, so the
-   * owner explicitly opts each group IN rather than groups opting
-   * themselves into something the owner never reviewed:
-   * - `dailySummaryEnabled`: the GROUP ADMIN's own toggle (default false),
-   *   settable via the normal PATCH route like any other setting.
-   * - `dailySummaryOwnerAllowed`: settable ONLY via the owner-only
-   *   `/api/miniapp/owner/groups/[groupId]/dailysummary` route (stripped
-   *   from the group PATCH route the same way ownerChannelId is) — the BOT
-   *   OWNER deciding which specific groups this is even offered to at all.
-   * The feature only actually runs when BOTH are true. */
-  dailySummaryEnabled: boolean;
+  /** ROADMAP.md §7.3 "Ежедневная ИИ-сводка чата" — 2026-09-14 re-cut:
+   * OWNER-ONLY now, no group-admin-facing toggle at all (the group's own
+   * `dailySummaryEnabled` field was removed — this used to be a two-gate
+   * design, the admin half is gone). Settable ONLY via the owner-only
+   * `/api/miniapp/owner/groups/[groupId]/dailysummary` route (stripped from
+   * the group PATCH route the same way `ownerChannelId` is) — the bot owner
+   * alone decides which groups this runs for. The digest itself is no
+   * longer posted into the source group either — see
+   * `lib/db/digestHub.ts`: it goes to a separate hub supergroup the owner
+   * controls, one forum topic per source group. */
   dailySummaryOwnerAllowed: boolean;
   /** "YYYY-MM-DD" (UTC) of the last day a summary was actually sent, or
    * null — idempotency guard, same shape as lastDigestSentMonth. */
@@ -312,7 +308,6 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   reactionSpamEnabled: false,
   ocrEnabled: false,
   antiFirstCommentEnabled: false,
-  dailySummaryEnabled: false,
   dailySummaryOwnerAllowed: false,
   lastDailySummarySentDate: null,
 };

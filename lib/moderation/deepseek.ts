@@ -263,8 +263,8 @@ export async function classifyWithDeepseekShadow(
 const SUMMARY_TIMEOUT_MS = 15_000;
 const SUMMARY_COMPLETION_TOKENS = 500;
 const SUMMARY_SYSTEM_PROMPT: Record<Lang, string> = {
-  ru: "Ты составляешь краткую сводку дня для администратора Telegram-группы на основе переписки участников. Выдели 4-8 пунктов: главные темы обсуждения, важные решения/договорённости, конфликты, если были. Пиши по-русски, кратко, маркированным списком, без вступления и выводов. Игнорируй техническую болтовню и одиночные реплики без контекста.",
-  uz: "Siz Telegram guruhi administratori uchun kunlik qisqa xulosani a'zolar yozishmalari asosida tuzasiz. 4-8 bandda: muhokamaning asosiy mavzulari, muhim qarorlar/kelishuvlar, agar bo'lsa — nizolar. O'zbek tilida, qisqa, ro'yxat ko'rinishida, kirish va xulosasiz yozing. Texnik shovqin va kontekstsiz alohida repliklarni e'tiborsiz qoldiring.",
+  ru: "Ты составляешь краткую сводку дня для владельца Telegram-бота на основе переписки в группе — он лично в этой группе не состоит, сводка идёт в отдельный чат. Выдели 4-8 пунктов: главные темы дня, кто из участников (по именам) больше всего писал или поднимал темы, важные решения/договорённости, конфликты — если были. Пиши по-русски, кратко, маркированным списком, без вступления и выводов. Игнорируй техническую болтовню и одиночные реплики без контекста.",
+  uz: "Siz Telegram bot egasi uchun kunlik qisqa xulosani guruh yozishmalari asosida tuzasiz — u shu guruhning a'zosi emas, xulosa alohida chatga boradi. 4-8 bandda: kunning asosiy mavzulari, qaysi a'zolar (ism bilan) eng ko'p yozgan yoki mavzu ko'targan, muhim qarorlar/kelishuvlar, agar bo'lsa — nizolar. O'zbek tilida, qisqa, ro'yxat ko'rinishida, kirish va xulosasiz yozing. Texnik shovqin va kontekstsiz alohida repliklarni e'tiborsiz qoldiring.",
 };
 
 function buildDailySummaryUserContent(entries: DailySummaryEntry[]): string {

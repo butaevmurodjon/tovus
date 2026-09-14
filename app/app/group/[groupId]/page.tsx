@@ -205,20 +205,6 @@ export default function GroupSettingsPage() {
     }
   }
 
-  async function toggleDailySummary(value: boolean) {
-    haptic("light");
-    try {
-      const rejected = await updateSettings({ dailySummaryEnabled: value });
-      if (rejected.includes("dailySummaryEnabled")) {
-        hapticNotify("error");
-        flash(t("miniapp.dailySummaryLockedHint"));
-      }
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    }
-  }
-
   async function toggleProFeature(key: "captchaEnabled" | "antiraidEnabled" | "federationEnabled", value: boolean) {
     haptic("light");
     try {
@@ -1018,21 +1004,6 @@ export default function GroupSettingsPage() {
             </Row>
             <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
               {t("miniapp.antiFirstCommentHint")}
-            </p>
-
-            <Divider />
-            <Row
-              label={
-                <span className="flex items-center gap-1.5">
-                  {t("miniapp.dailySummaryTitle")}
-                  {!settings.dailySummaryOwnerAllowed && <Badge variant="warning">{t("miniapp.dailySummaryLockedBadge")}</Badge>}
-                </span>
-              }
-            >
-              <Toggle checked={settings.dailySummaryEnabled} onChange={toggleDailySummary} />
-            </Row>
-            <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
-              {settings.dailySummaryOwnerAllowed ? t("miniapp.dailySummaryHint") : t("miniapp.dailySummaryLockedHint")}
             </p>
           </Collapsible>
         </CardSection>

@@ -12,6 +12,7 @@ import { Badge } from "@/components/Badge";
 import { StatTile } from "@/components/StatTile";
 import { PermissionWarning } from "@/components/PermissionWarning";
 import { Collapsible } from "@/components/Collapsible";
+import { JoinRequestsCard } from "./JoinRequestsCard";
 import { haptic, hapticNotify, openInvoice, openTelegramLink } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
 import { isProActive, formatPlanDate, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
@@ -595,6 +596,8 @@ export default function GroupSettingsPage() {
           )}
         </CardSection>
       </Card>
+
+      <JoinRequestsCard chatId={chatId} />
 
       <Card>
         <CardSection title={t("miniapp.sectionNewMembers")}>

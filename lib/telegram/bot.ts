@@ -61,6 +61,7 @@ import { castVote, clearVoteBan, getVoteBanMessageId, liftSanction } from "./vot
 import { sendWelcomeMessage } from "./welcome";
 import { activateProPlan, parseProPayload, parseUnbanPayload } from "./payments";
 import { setAppealStatus } from "@/lib/db/appeals";
+import { addPendingJoinRequest, removePendingJoinRequest } from "@/lib/db/joinRequests";
 import { displayName, mentionHtml } from "./format";
 import { containsAdminTag } from "@/lib/moderation/adminTagger";
 import { checkReactionFlood } from "@/lib/moderation/reactionSpam";
@@ -206,6 +207,10 @@ export function getBot(): Bot {
     const isIn = ["member", "restricted"].includes(update.new_chat_member.status);
     if (!wasIn && isIn) {
       await markNewMember(chat.id, update.new_chat_member.user.id);
+      // §7.3: a request approved through Telegram's own native UI (not our
+      // bulk-review screen) surfaces here as an ordinary join — clear it from
+      // the "still pending" list so it doesn't show up for review anymore.
+      await removePendingJoinRequest(chat.id, update.new_chat_member.user.id).catch(() => {});
     }
 
     // Keep the userId -> adminGroups reverse index (used by the Mini App
@@ -372,7 +377,19 @@ export function getBot(): Bot {
         settings.lang,
         settings.captchaTimeoutSeconds
       );
+      return;
     }
+
+    // §7.3 bulk join-request review: only requests NOT already headed for
+    // auto-resolution above (globalban/CAS decline it outright; captcha
+    // resolves it itself) land in the "genuinely pending, needs a human"
+    // list the Mini App's bulk-approve/decline screen reads.
+    await addPendingJoinRequest(chat.id, {
+      userId: user.id,
+      displayName: [user.first_name, user.last_name].filter(Boolean).join(" ") || String(user.id),
+      username: user.username ?? null,
+      requestedAt: Date.now(),
+    }).catch(() => {});
   });
 
   // Join-request captcha answer — see lib/telegram/joinRequestCaptcha.ts. Kept

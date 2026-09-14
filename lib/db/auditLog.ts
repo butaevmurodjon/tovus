@@ -18,7 +18,8 @@ export type OwnerAuditAction =
   | "group_ban"
   | "group_unban"
   | "group_delete"
-  | "group_resetrep";
+  | "group_resetrep"
+  | "daily_summary_toggle";
 
 export interface OwnerAuditEntry {
   id: string;

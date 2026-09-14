@@ -5,6 +5,7 @@ import { useApp } from "@/contexts/AppProvider";
 import { useGroup } from "@/contexts/GroupProvider";
 import { Card, CardSection } from "@/components/Card";
 import { Button } from "@/components/Button";
+import { Toggle } from "@/components/Toggle";
 import { confirmAction, haptic, hapticNotify } from "@/lib/miniapp/telegram";
 import { ownerActionErrorText } from "@/lib/miniapp/ownerActionErrorText";
 
@@ -18,6 +19,12 @@ export default function GroupOwnerPage() {
   const [repUserId, setRepUserId] = useState("");
   const [busy, setBusy] = useState<Action | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Local, optimistic — dailySummaryOwnerAllowed isn't reachable through the
+  // group's own PATCH route (see that route's doc comment), so there's no
+  // shared GroupProvider state to sync with; seeded once from the settings
+  // this page already has.
+  const [summaryAllowed, setSummaryAllowed] = useState(settings?.dailySummaryOwnerAllowed ?? false);
+  const [summaryBusy, setSummaryBusy] = useState(false);
 
   function flash(text: string) {
     setNotice(text);
@@ -60,6 +67,27 @@ export default function GroupOwnerPage() {
     }
   }
 
+  async function toggleDailySummaryAllowed(value: boolean) {
+    haptic("light");
+    setSummaryBusy(true);
+    const previous = summaryAllowed;
+    setSummaryAllowed(value); // optimistic — reverted on failure below
+    try {
+      await fetcher(`/api/miniapp/owner/groups/${chatId}/dailysummary`, {
+        method: "POST",
+        body: JSON.stringify({ allowed: value }),
+      });
+      hapticNotify("success");
+      flash(value ? "Ежедневная ИИ-сводка разрешена для этой группы." : "Ежедневная ИИ-сводка запрещена для этой группы.");
+    } catch (error) {
+      setSummaryAllowed(previous);
+      hapticNotify("error");
+      flash(ownerActionErrorText(error));
+    } finally {
+      setSummaryBusy(false);
+    }
+  }
+
   // The navigation item is already hidden for everyone else. Keeping this guard
   // here also prevents a briefly rendered control if a route is opened directly.
   if (!isOwner) return null;
@@ -77,6 +105,18 @@ export default function GroupOwnerPage() {
           <p className="text-[13px] leading-5" style={{ color: "var(--ink-muted)" }}>
             Действия выполняются ботом в этой группе. Вам не нужны права администратора группы, но у бота должны быть соответствующие права.
           </p>
+        </CardSection>
+      </Card>
+
+      <Card>
+        <CardSection title="Ежедневная ИИ-сводка чата">
+          <p className="text-[12px] mb-3" style={{ color: "var(--ink-muted)" }}>
+            Второй, обязательный ключ для группы поверх её собственного тумблера (ROADMAP §7.3) — текст переписки за день уходит во внешний сервис (DeepSeek), поэтому включается только явным решением владельца бота для конкретной группы.
+          </p>
+          <div className="flex items-center justify-between">
+            <span className="text-[14px]">{summaryAllowed ? "Разрешено" : "Запрещено"}</span>
+            <Toggle checked={summaryAllowed} onChange={toggleDailySummaryAllowed} disabled={summaryBusy} />
+          </div>
         </CardSection>
       </Card>
 

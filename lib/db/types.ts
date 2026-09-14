@@ -239,6 +239,25 @@ export interface GroupSettings {
    * most-visible comment. Only relevant to channel-linked groups; a no-op
    * everywhere else since the check requires `reply_to_message.is_automatic_forward`. */
   antiFirstCommentEnabled: boolean;
+
+  /** ROADMAP.md §7.3 "Ежедневная ИИ-сводка чата" — TWO independent gates,
+   * both required, on purpose. Sending a whole day's chat text to DeepSeek
+   * (not just one borderline message) is a materially bigger data-exposure
+   * step than anything else this bot does short of CORPUS_ENABLED, so the
+   * owner explicitly opts each group IN rather than groups opting
+   * themselves into something the owner never reviewed:
+   * - `dailySummaryEnabled`: the GROUP ADMIN's own toggle (default false),
+   *   settable via the normal PATCH route like any other setting.
+   * - `dailySummaryOwnerAllowed`: settable ONLY via the owner-only
+   *   `/api/miniapp/owner/groups/[groupId]/dailysummary` route (stripped
+   *   from the group PATCH route the same way ownerChannelId is) — the BOT
+   *   OWNER deciding which specific groups this is even offered to at all.
+   * The feature only actually runs when BOTH are true. */
+  dailySummaryEnabled: boolean;
+  dailySummaryOwnerAllowed: boolean;
+  /** "YYYY-MM-DD" (UTC) of the last day a summary was actually sent, or
+   * null — idempotency guard, same shape as lastDigestSentMonth. */
+  lastDailySummarySentDate: string | null;
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -293,6 +312,9 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   reactionSpamEnabled: false,
   ocrEnabled: false,
   antiFirstCommentEnabled: false,
+  dailySummaryEnabled: false,
+  dailySummaryOwnerAllowed: false,
+  lastDailySummarySentDate: null,
 };
 
 export interface JournalEntry {

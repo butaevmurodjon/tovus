@@ -87,6 +87,12 @@ export async function PATCH(
   // has nothing to do with this group) on any channel at all. Only
   // `ownerChannelUsername` is accepted from the client; the id is always
   // (re)resolved here.
+  // Owner-only field (see GroupSettings.dailySummaryOwnerAllowed doc
+  // comment) — a group admin's own PATCH call must never be able to grant
+  // itself this, only /api/miniapp/owner/groups/[groupId]/dailysummary can.
+  if ("dailySummaryOwnerAllowed" in patch) delete patch.dailySummaryOwnerAllowed;
+  if ("lastDailySummarySentDate" in patch) delete patch.lastDailySummarySentDate;
+
   let channelGateError: string | null = null;
   if ("ownerChannelId" in patch) delete patch.ownerChannelId;
   if ("ownerChannelUsername" in patch) {
@@ -132,6 +138,14 @@ export async function PATCH(
   // channel resolve/admin-check from the block above surfaces the same way
   // the (currently unused elsewhere) logChannelId convention already expects.
   if (channelGateError) rejected.push("ownerChannelUsername");
+
+  // dailySummaryEnabled's OTHER gate (dailySummaryOwnerAllowed) is owner-only
+  // and not eligibility-based, so it can't share the Pro gateKeys loop above —
+  // rejected the same way: a group admin can't turn this on until the bot
+  // owner has granted it for that specific group.
+  if (patch.dailySummaryEnabled === true && !settings.dailySummaryOwnerAllowed) {
+    rejected.push("dailySummaryEnabled");
+  }
 
   // Strip the rejected keys so an ineligible group can't persist a Pro toggle
   // through the Mini App — the chat commands already prevent this by gating

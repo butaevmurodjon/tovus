@@ -62,6 +62,7 @@ import { sendWelcomeMessage } from "./welcome";
 import { activateProPlan, parseProPayload, parseUnbanPayload } from "./payments";
 import { setAppealStatus } from "@/lib/db/appeals";
 import { addPendingJoinRequest, removePendingJoinRequest } from "@/lib/db/joinRequests";
+import { appendDailySummaryMessage } from "@/lib/db/dailySummaryBuffer";
 import { displayName, mentionHtml } from "./format";
 import { containsAdminTag } from "@/lib/moderation/adminTagger";
 import { checkReactionFlood } from "@/lib/moderation/reactionSpam";
@@ -907,6 +908,15 @@ export function getBot(): Bot {
           from.username
         ).catch(() => {})
       );
+      // §7.3 daily AI summary — both gates required (see GroupSettings'
+      // doc comment); a no-op read of two already-loaded booleans for every
+      // group that hasn't had both explicitly turned on.
+      const summaryText = message.text ?? message.caption ?? "";
+      if (settings.dailySummaryEnabled && settings.dailySummaryOwnerAllowed && summaryText.trim()) {
+        sideEffects.push(
+          appendDailySummaryMessage(chat.id, { displayName: displayName(from), text: summaryText }).catch(() => {})
+        );
+      }
     }
     await Promise.all(sideEffects);
 

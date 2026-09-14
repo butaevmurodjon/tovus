@@ -1,11 +1,13 @@
 import { getRedis } from "@/lib/db/redis";
 import { fetchWithTimeout } from "@/lib/http";
 import { listAiRules } from "@/lib/db/aiRules";
+import type { Lang } from "@/lib/i18n";
+import type { DailySummaryEntry } from "@/lib/db/dailySummaryBuffer";
 
 const API_URL = "https://api.deepseek.com/chat/completions";
 const MODEL = "deepseek-chat";
 
-export type QuotaPool = "free" | "pro" | "shadow";
+export type QuotaPool = "free" | "pro" | "shadow" | "digest";
 
 // Conservative guards so a burst of free-tier groups can never starve a
 // paying Pro group's quota — the "dedicated AI quota" perk. Numbers
@@ -27,6 +29,11 @@ const BUDGETS: Record<QuotaPool, { rpm: number; rpd: number; tpm: number; tpd: n
   // the plan calls for — tune via BUDGETS, not a separate knob. Sampling rate
   // (CORPUS_AI_SAMPLE_RATE) is the coarse control; this is the safety cap.
   shadow: { rpm: 5, rpd: 400, tpm: 2000, tpd: 20_000 },
+  // §7.3 daily AI summary: cron-triggered, at most once per group per day
+  // (both dailySummaryEnabled + dailySummaryOwnerAllowed required — see
+  // GroupSettings), but each call's INPUT is a whole day of chat text, not
+  // one message — tpd needs real headroom even though rpd stays tiny.
+  digest: { rpm: 5, rpd: 60, tpm: 30_000, tpd: 150_000 },
 };
 
 const MAX_ATTEMPTS = 3;
@@ -246,4 +253,75 @@ export async function classifyWithDeepseekShadow(
   opts: { quotedText?: string } = {}
 ): Promise<DeepseekClassification | null> {
   return classifyWithDeepseek(text, "shadow", opts);
+}
+
+// §7.3 "Ежедневная ИИ-сводка чата" — a fundamentally different call shape
+// from classifyWithDeepseek's single-message JSON verdict: a whole day's
+// transcript in, a short free-text digest out. Kept as its own function
+// (not a classifyWithDeepseek variant) rather than forcing both through one
+// shared shape.
+const SUMMARY_TIMEOUT_MS = 15_000;
+const SUMMARY_COMPLETION_TOKENS = 500;
+const SUMMARY_SYSTEM_PROMPT: Record<Lang, string> = {
+  ru: "Ты составляешь краткую сводку дня для администратора Telegram-группы на основе переписки участников. Выдели 4-8 пунктов: главные темы обсуждения, важные решения/договорённости, конфликты, если были. Пиши по-русски, кратко, маркированным списком, без вступления и выводов. Игнорируй техническую болтовню и одиночные реплики без контекста.",
+  uz: "Siz Telegram guruhi administratori uchun kunlik qisqa xulosani a'zolar yozishmalari asosida tuzasiz. 4-8 bandda: muhokamaning asosiy mavzulari, muhim qarorlar/kelishuvlar, agar bo'lsa — nizolar. O'zbek tilida, qisqa, ro'yxat ko'rinishida, kirish va xulosasiz yozing. Texnik shovqin va kontekstsiz alohida repliklarni e'tiborsiz qoldiring.",
+};
+
+function buildDailySummaryUserContent(entries: DailySummaryEntry[]): string {
+  return entries.map((e) => `${e.displayName}: ${e.text}`).join("\n").slice(0, 12_000);
+}
+
+/**
+ * Summarizes a day's buffered chat text (lib/db/dailySummaryBuffer.ts) into
+ * a short digest. Returns null on any failure, missing config, empty input,
+ * or exhausted budget — the cron caller (app/api/cron/daily-summary) simply
+ * skips sending anything for that group in every such case, never throws.
+ */
+export async function summarizeDailyChat(entries: DailySummaryEntry[], lang: Lang): Promise<string | null> {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey || entries.length === 0) return null;
+
+  const systemPrompt = SUMMARY_SYSTEM_PROMPT[lang] ?? SUMMARY_SYSTEM_PROMPT.ru;
+  const userContent = buildDailySummaryUserContent(entries);
+  if (!(await withinRateBudget("digest", systemPrompt, userContent))) return null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetchWithTimeout(
+        API_URL,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            temperature: 0.3,
+            max_tokens: SUMMARY_COMPLETION_TOKENS,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: userContent },
+            ],
+          }),
+        },
+        SUMMARY_TIMEOUT_MS
+      );
+
+      if (!res.ok) {
+        const retriable = res.status === 429 || res.status >= 500;
+        if (!retriable || attempt === MAX_ATTEMPTS) return null;
+        await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1) + Math.random() * 200);
+        continue;
+      }
+
+      const data = (await res.json()) as DeepseekResponse;
+      const content = data.choices?.[0]?.message?.content;
+      return content?.trim() || null;
+    } catch {
+      if (attempt === MAX_ATTEMPTS) return null;
+      await sleep(BASE_BACKOFF_MS * 2 ** (attempt - 1) + Math.random() * 200);
+    }
+  }
+  return null;
 }

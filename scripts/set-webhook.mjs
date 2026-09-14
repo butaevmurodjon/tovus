@@ -34,6 +34,10 @@ const res = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
       "chat_member",
       "callback_query",
       "pre_checkout_query",
+      // ROADMAP.md §7.3 "Спам реакциями" — Telegram never sends this update
+      // at all unless it's explicitly listed here, even if the bot is an
+      // admin of the chat.
+      "message_reaction",
     ],
     drop_pending_updates: false,
   }),

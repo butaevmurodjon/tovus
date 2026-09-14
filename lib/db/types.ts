@@ -218,6 +218,12 @@ export interface GroupSettings {
    * flagged there as the highest-ROI item after §7.2: mass-created spam
    * accounts are almost always fresh, unlike most other join signals here. */
   minAccountAgeDays: number;
+
+  /** Off by default (ROADMAP.md §7.3): mutes (10 min, reactionSpam.ts) a
+   * member who rapid-fires reactions across the chat — Telegram gives no API
+   * to remove an already-placed reaction, same limitation @LolsBot's own
+   * docs note, so the response is a short mute rather than a deletion. */
+  reactionSpamEnabled: boolean;
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -269,6 +275,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   blockNoPhoto: false,
   premiumJoinFilter: "off",
   minAccountAgeDays: 0,
+  reactionSpamEnabled: false,
 };
 
 export interface JournalEntry {

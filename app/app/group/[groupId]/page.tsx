@@ -972,6 +972,17 @@ export default function GroupSettingsPage() {
               columns={minAccountAgeOptions.length}
               options={minAccountAgeOptions}
             />
+
+            <Divider />
+            <Row label={t("miniapp.reactionSpamTitle")}>
+              <Toggle
+                checked={settings.reactionSpamEnabled}
+                onChange={(v) => setField("reactionSpamEnabled", v)}
+              />
+            </Row>
+            <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.reactionSpamHint")}
+            </p>
           </Collapsible>
         </CardSection>
       </Card>

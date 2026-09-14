@@ -63,6 +63,8 @@ import { activateProPlan, parseProPayload, parseUnbanPayload } from "./payments"
 import { setAppealStatus } from "@/lib/db/appeals";
 import { displayName, mentionHtml } from "./format";
 import { containsAdminTag } from "@/lib/moderation/adminTagger";
+import { checkReactionFlood } from "@/lib/moderation/reactionSpam";
+import { REACTION_MUTE_DURATION_SECONDS } from "@/lib/moderation/spamDict";
 
 let _bot: Bot | null = null;
 
@@ -283,6 +285,45 @@ export function getBot(): Bot {
     ) {
       await addToWhitelist(chat.id, update.new_chat_member.user.id).catch(() => {});
     }
+  });
+
+  // ROADMAP.md §7.3 "Спам реакциями": an account rapid-firing reactions
+  // across the chat to draw attention to its profile. Requires
+  // "message_reaction" in setWebhook's allowed_updates (scripts/set-webhook.mjs)
+  // and the bot to be an admin of the chat — Telegram silently never sends
+  // this update otherwise. Never fires for anonymous reactions (`user`
+  // absent, `actor_chat` set instead — no meaningful account to mute) or for
+  // an admin (an admin reacting a lot is normal chat moderation activity,
+  // not the self-boost pattern this targets).
+  bot.on("message_reaction", async (ctx) => {
+    const chat = ctx.chat;
+    const user = ctx.messageReaction.user;
+    if (!user || (chat.type !== "group" && chat.type !== "supergroup")) return;
+    const settings = await getGroupSettings(chat.id);
+    if (!settings?.reactionSpamEnabled) return;
+    if (await isChatAdmin(ctx.api, chat.id, user.id)) return;
+    if (!(await checkReactionFlood(chat.id, user.id))) return;
+    await ctx.api
+      .restrictChatMember(
+        chat.id,
+        user.id,
+        {
+          can_send_messages: false,
+          can_send_audios: false,
+          can_send_documents: false,
+          can_send_photos: false,
+          can_send_videos: false,
+          can_send_video_notes: false,
+          can_send_voice_notes: false,
+          can_send_polls: false,
+          can_send_other_messages: false,
+        },
+        { until_date: Math.floor(Date.now() / 1000) + REACTION_MUTE_DURATION_SECONDS }
+      )
+      .catch(() => {});
+    await ctx.api
+      .sendMessage(chat.id, t(settings.lang, "bot.reactionSpamMuted", { user: displayName(user) }))
+      .catch(() => {});
   });
 
   // A group with "approve new members" turned on (invite links requiring admin

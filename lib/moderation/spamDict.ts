@@ -246,3 +246,12 @@ export const DUPLICATE_WINDOW_SECONDS = 300;
 
 export const RAID_JOIN_THRESHOLD = 8;
 export const RAID_WINDOW_SECONDS = 30;
+
+// ROADMAP.md §7.3 — same self-boost pattern @LolsBot's "Спам реакциями" docs
+// describe (an account rapid-fires reactions across many messages/chats to
+// get attention on its profile). Telegram gives no API to remove a reaction
+// once placed (true for us too, same as Lols notes), so the response is a
+// short mute, not a deletion.
+export const REACTION_FLOOD_MAX = 8;
+export const REACTION_FLOOD_WINDOW_SECONDS = 30;
+export const REACTION_MUTE_DURATION_SECONDS = 60 * 10; // 10 min

@@ -231,6 +231,14 @@ export interface GroupSettings {
    * runs it through the same profanity/spam checks as ordinary text. No
    * effect at all unless `OCR_API_KEY` is also set bot-wide. */
   ocrEnabled: boolean;
+
+  /** Off by default (ROADMAP.md §7.3 "Антипервонах"): in a discussion group
+   * linked to a channel, deletes a comment posted within
+   * ANTI_FIRST_COMMENT_WINDOW_SECONDS of the channel post it replies to —
+   * spam bots monitor channel publications and race to be the first,
+   * most-visible comment. Only relevant to channel-linked groups; a no-op
+   * everywhere else since the check requires `reply_to_message.is_automatic_forward`. */
+  antiFirstCommentEnabled: boolean;
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -284,6 +292,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   minAccountAgeDays: 0,
   reactionSpamEnabled: false,
   ocrEnabled: false,
+  antiFirstCommentEnabled: false,
 };
 
 export interface JournalEntry {

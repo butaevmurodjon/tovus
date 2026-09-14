@@ -273,6 +273,8 @@
     "joinRequestsDeclineAll": "Отклонить все",
     "joinRequestsConfirmApprove": "Принять все заявки ({count})?",
     "joinRequestsConfirmDecline": "Отклонить все заявки ({count})?",
+    "antiFirstCommentTitle": "Антипервонах",
+    "antiFirstCommentHint": "В группе-обсуждении при канале удалять комментарии, оставленные в первые 30 секунд после публикации поста — частый признак бота-спамера, мониторящего канал.",
     "restrictNewMembersMinutesLabel": "Длительность (минут)",
     "nightModeTitle": "Тихий час",
     "nightModeHint": "В выбранные часы сообщения обычных участников удаляются. Администраторы и белый список не затрагиваются.",

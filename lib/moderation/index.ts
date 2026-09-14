@@ -14,6 +14,7 @@ import { detectRestrictedContent, isNewMemberRestricted } from "./newMemberGuard
 import { isNightModeActive } from "./nightMode";
 import { isRepeatOffender } from "./reputation";
 import { detectStrictContentViolation } from "./strictContentRules";
+import { isTooFastFirstComment } from "./antiFirstComment";
 
 /** §4.9: which detector produced the verdict — purely additive metadata, never
  * read by applyViolation/reputation.ts. Exists so the §4 shadow scorer
@@ -28,6 +29,7 @@ export type ModerationSource =
   | "spam-detector"
   | "flood"
   | "strict-content"
+  | "anti-first-comment"
   | "premium-ai";
 
 export interface ModerationVerdict {
@@ -126,6 +128,16 @@ export async function moderateMessage(
     if (reason) {
       return { category: "spam", reason, forceWarnOnly: !isKnownRepeatOffender, source: "restricted-content" };
     }
+  }
+
+  // §7.3 "Антипервонах" — see antiFirstComment.ts.
+  if (settings.antiFirstCommentEnabled && isTooFastFirstComment(message)) {
+    return {
+      category: "spam",
+      reason: "комментарий к посту канала слишком быстро после публикации",
+      forceWarnOnly: !isKnownRepeatOffender,
+      source: "anti-first-comment",
+    };
   }
 
   // Per-group content allowlist (domains + phrases the heuristics must never

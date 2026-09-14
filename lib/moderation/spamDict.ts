@@ -255,3 +255,6 @@ export const RAID_WINDOW_SECONDS = 30;
 export const REACTION_FLOOD_MAX = 8;
 export const REACTION_FLOOD_WINDOW_SECONDS = 30;
 export const REACTION_MUTE_DURATION_SECONDS = 60 * 10; // 10 min
+
+// ROADMAP.md §7.3 "Антипервонах" — @LolsBot's own window for this.
+export const ANTI_FIRST_COMMENT_WINDOW_SECONDS = 30;

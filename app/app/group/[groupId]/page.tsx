@@ -994,6 +994,17 @@ export default function GroupSettingsPage() {
             <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
               {t("miniapp.ocrHint")}
             </p>
+
+            <Divider />
+            <Row label={t("miniapp.antiFirstCommentTitle")}>
+              <Toggle
+                checked={settings.antiFirstCommentEnabled}
+                onChange={(v) => setField("antiFirstCommentEnabled", v)}
+              />
+            </Row>
+            <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.antiFirstCommentHint")}
+            </p>
           </Collapsible>
         </CardSection>
       </Card>

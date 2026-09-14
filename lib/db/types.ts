@@ -210,6 +210,14 @@ export interface GroupSettings {
    * booleans, since the two are mutually exclusive — nothing sensible
    * happens with both on at once. */
   premiumJoinFilter: "off" | "block_premium" | "block_non_premium";
+
+  /** 0 = off (default). When > 0, a joiner whose Telegram user id is
+   * estimated (lib/moderation/accountAge.ts — a public id→registration-date
+   * table, no extra API call) to be younger than this many days is kicked
+   * (ban+unban), same as the other join-time gates. ROADMAP.md §7.3 —
+   * flagged there as the highest-ROI item after §7.2: mass-created spam
+   * accounts are almost always fresh, unlike most other join signals here. */
+  minAccountAgeDays: number;
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -260,6 +268,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   blockNoUsername: false,
   blockNoPhoto: false,
   premiumJoinFilter: "off",
+  minAccountAgeDays: 0,
 };
 
 export interface JournalEntry {

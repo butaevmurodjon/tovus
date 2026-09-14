@@ -706,6 +706,16 @@ export function getBot(): Bot {
                 return;
               }
             }
+            // §7.3: estimated account-age gate — no extra API call, just a
+            // lookup against the public id→date table (accountAge.ts, the
+            // same estimator the captcha-force path below already used for
+            // a softer purpose). Kicks (not just captcha-forces) since an
+            // admin who set minAccountAgeDays explicitly accepted that
+            // stronger, more specific tradeoff.
+            if (settings.minAccountAgeDays > 0 && isLikelyNewAccount(member.id, settings.minAccountAgeDays)) {
+              await kickJoiner();
+              return;
+            }
 
             await incrementActivity(chat.id, "joins").catch(() => {});
             await recordJoinedGroup(member.id, chat.id).catch(() => {});

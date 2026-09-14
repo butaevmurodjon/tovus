@@ -36,6 +36,8 @@ const RESTRICT_MINUTES_PRESETS = [5, 10, 30, 60];
 
 const CAPTCHA_TIMEOUT_PRESETS = [60, 120, 300];
 
+const MIN_ACCOUNT_AGE_PRESETS = [0, 1, 3, 7, 30];
+
 const PRO_GRANT_DAYS = [30, 90, 365];
 
 /** Module scope (not the component body) so the current-time read here isn't
@@ -353,6 +355,11 @@ export default function GroupSettingsPage() {
         value: String(n),
         label: String(n),
       }));
+
+  const minAccountAgeOptions = MIN_ACCOUNT_AGE_PRESETS.map((n) => ({
+    value: String(n),
+    label: n === 0 ? t("common.off") : String(n),
+  }));
 
   const captchaTimeoutOptions = CAPTCHA_TIMEOUT_PRESETS.includes(settings.captchaTimeoutSeconds)
     ? CAPTCHA_TIMEOUT_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
@@ -952,6 +959,18 @@ export default function GroupSettingsPage() {
                 { value: "block_premium", label: t("miniapp.premiumJoinFilterBlockPremium") },
                 { value: "block_non_premium", label: t("miniapp.premiumJoinFilterBlockNonPremium") },
               ]}
+            />
+
+            <Divider />
+            <p className="text-[13px] font-medium mb-1.5">{t("miniapp.minAccountAgeTitle")}</p>
+            <p className="text-[12px] mb-2" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.minAccountAgeHint")}
+            </p>
+            <SegmentedControl
+              value={String(settings.minAccountAgeDays)}
+              onChange={(v) => setField("minAccountAgeDays", Number(v))}
+              columns={minAccountAgeOptions.length}
+              options={minAccountAgeOptions}
             />
           </Collapsible>
         </CardSection>

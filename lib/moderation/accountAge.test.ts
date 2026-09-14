@@ -28,7 +28,12 @@ describe("estimateAccountCreatedAt", () => {
 
 describe("isLikelyNewAccount", () => {
   it("flags an ID mapping to a very recent date as new", () => {
-    expect(isLikelyNewAccount(9_000_000_000)).toBe(true);
+    // Far enough past the last anchor that the extrapolated estimate always
+    // overshoots "now" and gets clamped to it (estimateAccountCreatedAt's
+    // Math.min(now, ...)) — robust regardless of how the table's actual
+    // extrapolation rate changes as anchors are added over time, unlike a
+    // fixed id picked to just barely clear the table's *current* last anchor.
+    expect(isLikelyNewAccount(9_000_000_000_000)).toBe(true);
   });
 
   it("does not flag a long-established low ID as new", () => {

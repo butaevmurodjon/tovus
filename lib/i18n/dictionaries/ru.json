@@ -260,6 +260,8 @@
     "premiumJoinFilterTitle": "Фильтр по Telegram Premium",
     "premiumJoinFilterBlockPremium": "Блокировать Premium",
     "premiumJoinFilterBlockNonPremium": "Только Premium",
+    "minAccountAgeTitle": "Минимальный возраст аккаунта (дней)",
+    "minAccountAgeHint": "Новый участник, чей Telegram-аккаунт (по оценке) моложе выбранного срока, будет сразу выведен из группы. Оценка приблизительная, по номеру ID — без обращения к Telegram.",
     "restrictNewMembersMinutesLabel": "Длительность (минут)",
     "nightModeTitle": "Тихий час",
     "nightModeHint": "В выбранные часы сообщения обычных участников удаляются. Администраторы и белый список не затрагиваются.",

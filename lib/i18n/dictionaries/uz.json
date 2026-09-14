@@ -260,6 +260,8 @@
     "premiumJoinFilterTitle": "Telegram Premium бўйича фильтр",
     "premiumJoinFilterBlockPremium": "Premium-ни блоклаш",
     "premiumJoinFilterBlockNonPremium": "Фақат Premium",
+    "minAccountAgeTitle": "Аккаунтнинг минимал ёши (кун)",
+    "minAccountAgeHint": "Telegram-аккаунти (тахминан) танланган муддатдан ёш бўлган янги аъзо дарҳол гуруҳдан чиқарилади. Баҳо тахминий, ID рақами бўйича — Telegram-га мурожаат қилмасдан.",
     "restrictNewMembersMinutesLabel": "Давомийлиги (дақиқа)",
     "nightModeTitle": "Сокин соат",
     "nightModeHint": "Танланган соатларда оддий аъзоларнинг хабарлари ўчирилади. Администраторлар ва оқ рўйхатга таъсир қилмайди.",

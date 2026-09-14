@@ -5,6 +5,11 @@
  * Usage:
  *   TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=... \
  *   node scripts/set-webhook.mjs https://your-app.vercel.app
+ *
+ * Keep the `allowed_updates` list below in sync with app/api/health/route.ts's
+ * ALLOWED_UPDATES — that route re-runs this same setWebhook call
+ * automatically (self-heal) whenever it finds the webhook unhealthy, and an
+ * omitted/mismatched allowed_updates list resets what Telegram delivers.
  */
 const token = process.env.TELEGRAM_BOT_TOKEN;
 const secret = process.env.TELEGRAM_WEBHOOK_SECRET;

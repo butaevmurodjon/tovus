@@ -6,7 +6,7 @@ import type { SupportTicket } from "@/lib/db/types";
 import { t, type Lang } from "@/lib/i18n";
 
 /**
- * "Написать разработчику" — a GROUP ADMIN reaching the BOT OWNER, entered
+ * "Написать в поддержку" — a GROUP ADMIN reaching the BOT OWNER, entered
  * from the Mini App, conversation relayed through the bot itself (chosen
  * over a Mini App inbox because only the bot can push a notification to
  * either side — see the conversation this shipped from). Mirrors

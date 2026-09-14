@@ -182,7 +182,7 @@ export function registerCommands(bot: Bot): void {
         return;
       }
 
-      // "Написать разработчику" deep link from the Mini App (see supportUrl/
+      // "Написать в поддержку" deep link from the Mini App (see supportUrl/
       // parseSupportPayload in ./support). Only a real admin of that group may
       // open a ticket "for" it — an arbitrary user hitting this link can't
       // impersonate a group owner just by knowing/guessing the chat id.

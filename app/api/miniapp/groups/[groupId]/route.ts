@@ -56,7 +56,7 @@ export async function GET(
     whitelistCount: whitelist.length,
     violationsToday: todayStats.total,
     // Null when TELEGRAM_BOT_USERNAME isn't provisioned — the page must then
-    // simply omit the "Написать разработчику" button, same convention as
+    // simply omit the "Написать в поддержку" button, same convention as
     // addToGroupUrl()/appealUrl() elsewhere.
     supportUrl: supportUrl(chatId),
   });

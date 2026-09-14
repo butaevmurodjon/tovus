@@ -275,7 +275,7 @@ export interface AppealEntry {
 
 /**
  * A message a GROUP OWNER/ADMIN sent to the BOT OWNER (developer) — the
- * "Написать разработчику" flow entered from the Mini App, conversation
+ * "Написать в поддержку" flow entered from the Mini App, conversation
  * relayed through the bot itself (see lib/db/supportTickets.ts,
  * lib/telegram/support.ts). Distinct from AppealEntry, which is a group
  * MEMBER reaching that group's admin — this is a group admin reaching the

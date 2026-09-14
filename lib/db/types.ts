@@ -171,6 +171,45 @@ export interface GroupSettings {
    * chat can post through it unmoderated. Admins can still add any bot they
    * want; this only blocks non-admin adds. ROADMAP.md §7.2 item 1. */
   blockUnauthorizedBots: boolean;
+
+  /** Opt-in "block outright" content rules — ROADMAP.md §7.2 item 2. Empty
+   * array = off (default). Layered on top of, not instead of, the
+   * pattern-based spam.ts heuristics — see strictContentRules.ts for the
+   * full reasoning. One multi-select field rather than five booleans, since
+   * a group either wants zero tolerance for a given rule or doesn't (no
+   * meaningful partial-severity version, unlike most other toggles here). */
+  strictContentRules: import("@/lib/moderation/strictContentRules").StrictContentRule[];
+
+  /** Off by default: when a member is banned (by us or by an admin, either
+   * way — the `chat_member` update fires regardless of who did it), also
+   * delete their other recent messages (lib/db/messageAuthors.ts's
+   * getRecentMessageIds), not just the one that triggered the ban. Off by
+   * default since it's a stronger, more visible behavior change than a
+   * single deletion — same reasoning as deleteNotice/warnEscalationEnabled
+   * defaulting off. ROADMAP.md §7.2 item 4. */
+  purgeMessagesOnBan: boolean;
+
+  /** Off by default (admin convenience, not a safety feature — ROADMAP.md
+   * §7.2 item 5): when a member writes literal "@admin"/"@админ" (Telegram
+   * never resolves that to a real user), ping the chat's actual non-hidden
+   * admins instead. */
+  adminTaggerEnabled: boolean;
+
+  /** Off by default — ROADMAP.md §7.2 item 7: three join-time gates the Bot
+   * API answers for free off the `User` object already fetched for every
+   * joiner (no extra call beyond `getUserProfilePhotos` for the photo one).
+   * A rejected joiner is kicked (ban+unban, same as blockUnauthorizedBots) —
+   * not permanently banned, since fixing the profile (add a username/photo,
+   * or nothing to fix for the premium gate) and rejoining is the expected
+   * remedy, unlike a CAS/global-ban hit. */
+  blockNoUsername: boolean;
+  blockNoPhoto: boolean;
+  /** "off" (default) / "block_premium" (kick joiners WHO HAVE Telegram
+   * Premium — Lols' "С премиумом") / "block_non_premium" (kick joiners
+   * WITHOUT it — Lols' "Без премиума"). One field, not two independent
+   * booleans, since the two are mutually exclusive — nothing sensible
+   * happens with both on at once. */
+  premiumJoinFilter: "off" | "block_premium" | "block_non_premium";
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -215,6 +254,12 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   ownerChannelUsername: null,
   promoChannelOptIn: false,
   blockUnauthorizedBots: true,
+  strictContentRules: [],
+  purgeMessagesOnBan: false,
+  adminTaggerEnabled: false,
+  blockNoUsername: false,
+  blockNoPhoto: false,
+  premiumJoinFilter: "off",
 };
 
 export interface JournalEntry {

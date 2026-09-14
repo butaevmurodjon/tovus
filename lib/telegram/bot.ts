@@ -4,6 +4,7 @@ import { after } from "next/server";
 import type { Message, User } from "grammy/types";
 import type { CaptchaType } from "@/lib/db/types";
 import {
+  addToWhitelist,
   getGroupSettings,
   isRegisteredGroup,
   isWhitelisted,
@@ -24,7 +25,7 @@ import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } fro
 import { incrementActivity, incrementHourlyActivity, incrementReasonTag, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { isGloballyBanned } from "@/lib/db/globalBan";
-import { getCachedMessage, getLastMessageId, recordMessage } from "@/lib/db/messageAuthors";
+import { getCachedMessage, getLastMessageId, getRecentMessageIds, recordMessage } from "@/lib/db/messageAuthors";
 import { formatPlanDate } from "@/lib/billing/plan";
 import { moderateMessage } from "@/lib/moderation";
 import { checkRaid, markNewMember } from "@/lib/moderation/flood";
@@ -60,7 +61,8 @@ import { castVote, clearVoteBan, getVoteBanMessageId, liftSanction } from "./vot
 import { sendWelcomeMessage } from "./welcome";
 import { activateProPlan, parseProPayload, parseUnbanPayload } from "./payments";
 import { setAppealStatus } from "@/lib/db/appeals";
-import { displayName } from "./format";
+import { displayName, mentionHtml } from "./format";
+import { containsAdminTag } from "@/lib/moderation/adminTagger";
 
 let _bot: Bot | null = null;
 
@@ -247,6 +249,39 @@ export function getBot(): Bot {
           goldBy: update.from.id,
         }).catch(() => {});
       });
+    }
+
+    // §7.2 item 4: clean up a banned member's OTHER recent messages, not
+    // just the one that triggered the ban — fires for a ban from any
+    // source (our own moderation, admin_ban above, or a manual native-UI
+    // ban), since Telegram reports the same status change regardless of who
+    // performed it. Best-effort per message (a >48h-old message can't be
+    // deleted at all — Bot API limit, same one @LolsBot's own "Очистка при
+    // выходе" docs call out) and opt-in (see purgeMessagesOnBan doc comment).
+    if (banned) {
+      const settings = await getGroupSettings(chat.id);
+      if (settings?.purgeMessagesOnBan) {
+        const ids = await getRecentMessageIds(chat.id, bannedUser.id).catch(() => []);
+        await Promise.all(ids.map((id) => ctx.api.deleteMessage(chat.id, id).catch(() => {})));
+      }
+    }
+
+    // §7.2 item 3: an admin unbanning someone through Telegram's own native
+    // "Manage group" UI (not our journal's "Восстановить"/"Больше не
+    // наказывать" buttons, which already call addToWhitelist explicitly)
+    // otherwise has no way to tell the bot "don't re-ban this person" — the
+    // very next matching message would trigger the same verdict again.
+    // `!update.from.is_bot` is the same signal the admin-ban gold-label
+    // capture above uses to distinguish a human admin's action from our own
+    // API calls (which always report the bot itself as `from`), so this
+    // never fires for our own unban/restore flows.
+    if (
+      update.old_chat_member.status === "kicked" &&
+      update.new_chat_member.status !== "kicked" &&
+      !update.from.is_bot &&
+      !update.new_chat_member.user.is_bot
+    ) {
+      await addToWhitelist(chat.id, update.new_chat_member.user.id).catch(() => {});
     }
   });
 
@@ -538,6 +573,28 @@ export function getBot(): Bot {
 
     const settings = await getGroupSettings(chat.id);
 
+    // §7.2 item 5: admin-convenience utility, independent of the moderation
+    // toggles below (still works with profanityFilter/antispam both off) —
+    // a member pinging "@admin"/"@админ" (never a real, resolvable user) gets
+    // the chat's actual non-hidden admins tagged instead. Not gated on
+    // isEdit: editing a message to add "@admin" is a normal way to ask for
+    // help too.
+    if (settings?.adminTaggerEnabled && !isEdit) {
+      const text = message.text ?? message.caption ?? "";
+      if (containsAdminTag(text)) {
+        const admins = await ctx.api.getChatAdministrators(chat.id).catch(() => null);
+        const pingable = (admins ?? []).filter((m) => !m.user.is_bot && !("is_anonymous" in m && m.is_anonymous));
+        if (pingable.length > 0) {
+          await ctx.api
+            .sendMessage(chat.id, pingable.map((m) => mentionHtml(m.user)).join(" "), {
+              parse_mode: "HTML",
+              reply_parameters: { message_id: message.message_id },
+            })
+            .catch(() => {});
+        }
+      }
+    }
+
     if (message.new_chat_members?.length) {
       if (settings?.deleteServiceMessages ?? true) {
         await ctx.api.deleteMessage(chat.id, message.message_id).catch(() => {});
@@ -617,6 +674,37 @@ export function getBot(): Bot {
                 ]);
               }
               return;
+            }
+
+            // §7.2 item 7: free join-time gates — `is_premium` is already on
+            // the `User` object this handler received, no-username is a
+            // property check, only no-photo costs an extra call
+            // (getUserProfilePhotos). A rejection here is a kick
+            // (ban+unban, same as blockUnauthorizedBots/dead-account
+            // patterns elsewhere) — fixing the profile and rejoining is the
+            // expected remedy, unlike a CAS/global-ban hit.
+            const kickJoiner = async () => {
+              await ctx.api.banChatMember(chat.id, member.id).catch(() => false);
+              await ctx.api.unbanChatMember(chat.id, member.id).catch(() => {});
+            };
+            if (settings.blockNoUsername && !member.username) {
+              await kickJoiner();
+              return;
+            }
+            if (settings.premiumJoinFilter === "block_premium" && member.is_premium) {
+              await kickJoiner();
+              return;
+            }
+            if (settings.premiumJoinFilter === "block_non_premium" && !member.is_premium) {
+              await kickJoiner();
+              return;
+            }
+            if (settings.blockNoPhoto) {
+              const photos = await ctx.api.getUserProfilePhotos(member.id, { limit: 1 }).catch(() => null);
+              if (photos && photos.total_count === 0) {
+                await kickJoiner();
+                return;
+              }
             }
 
             await incrementActivity(chat.id, "joins").catch(() => {});

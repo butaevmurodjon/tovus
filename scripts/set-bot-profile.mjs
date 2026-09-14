@@ -140,6 +140,18 @@ const results = await Promise.all([
   api("setMyCommands", { commands: commandsRu, language_code: "ru" }),
   api("setMyCommands", { commands: commandsUz, language_code: "uz" }),
   api("setMyCommands", { commands: commandsRu }),
+  // ROADMAP.md §7.2 item 6 ("Скрыть /меню"): BotCommandScope, not a per-group
+  // setting — Telegram resolves scopes by specificity, so setting
+  // all_group_chats to an EMPTY list hides the "/" autocomplete from regular
+  // members in every group, while all_chat_administrators (more specific,
+  // only matches when Telegram itself confirms the user is an admin of that
+  // chat) keeps the full list for admins there. Private chats are untouched —
+  // neither scope applies outside groups, so they keep falling through to the
+  // plain default/language-only setMyCommands calls above.
+  api("setMyCommands", { commands: [], scope: { type: "all_group_chats" } }),
+  api("setMyCommands", { commands: commandsRu, scope: { type: "all_chat_administrators" }, language_code: "ru" }),
+  api("setMyCommands", { commands: commandsUz, scope: { type: "all_chat_administrators" }, language_code: "uz" }),
+  api("setMyCommands", { commands: commandsRu, scope: { type: "all_chat_administrators" } }),
 ]);
 
 const labels = [
@@ -151,6 +163,10 @@ const labels = [
   "setMyCommands (ru)",
   "setMyCommands (uz)",
   "setMyCommands (default)",
+  "setMyCommands (all_group_chats, hidden)",
+  "setMyCommands (all_chat_administrators, ru)",
+  "setMyCommands (all_chat_administrators, uz)",
+  "setMyCommands (all_chat_administrators, default)",
 ];
 for (const [i, name] of labels.entries()) {
   console.log(name, results[i].ok ? "OK" : `FAILED: ${results[i].description}`);

@@ -22,6 +22,11 @@ import {
   type StrictnessLevel,
 } from "@/lib/moderation/strictnessPresets";
 import type { GroupSettings } from "@/lib/db/types";
+import { ALL_STRICT_CONTENT_RULES, type StrictContentRule } from "@/lib/moderation/strictContentRules";
+
+const STRICT_CONTENT_RULE_OPTIONS: { value: StrictContentRule; labelKey: string }[] = ALL_STRICT_CONTENT_RULES.map(
+  (value) => ({ value, labelKey: `miniapp.strictContentRule_${value}` })
+);
 
 const WARN_LIMIT_PRESETS = [3, 5, 10];
 
@@ -867,6 +872,87 @@ export default function GroupSettingsPage() {
                 {t("miniapp.groupBroadcastLink")}
               </Link>
             )}
+
+            <Divider />
+            <p className="text-[13px] font-medium mb-1.5">{t("miniapp.strictContentTitle")}</p>
+            <p className="text-[12px] mb-2" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.strictContentHint")}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {STRICT_CONTENT_RULE_OPTIONS.map(({ value, labelKey }) => {
+                const active = settings.strictContentRules.includes(value);
+                return (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() =>
+                      setField(
+                        "strictContentRules",
+                        active
+                          ? settings.strictContentRules.filter((r) => r !== value)
+                          : [...settings.strictContentRules, value]
+                      )
+                    }
+                    className="rounded-full px-3 py-1.5 text-[12px] font-medium border"
+                    style={
+                      active
+                        ? { background: "var(--ink)", color: "var(--bg)", borderColor: "var(--ink)" }
+                        : { borderColor: "var(--border-strong)", color: "var(--ink)" }
+                    }
+                  >
+                    {t(labelKey)}
+                  </button>
+                );
+              })}
+            </div>
+
+            <Divider />
+            <Row label={t("miniapp.adminTaggerTitle")}>
+              <Toggle checked={settings.adminTaggerEnabled} onChange={(v) => setField("adminTaggerEnabled", v)} />
+            </Row>
+            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.adminTaggerHint")}
+            </p>
+
+            <Divider />
+            <Row label={t("miniapp.purgeMessagesOnBanTitle")}>
+              <Toggle
+                checked={settings.purgeMessagesOnBan}
+                onChange={(v) => setField("purgeMessagesOnBan", v)}
+              />
+            </Row>
+            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.purgeMessagesOnBanHint")}
+            </p>
+
+            <Divider />
+            <Row label={t("miniapp.blockNoUsernameTitle")}>
+              <Toggle checked={settings.blockNoUsername} onChange={(v) => setField("blockNoUsername", v)} />
+            </Row>
+            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.blockNoUsernameHint")}
+            </p>
+
+            <Divider />
+            <Row label={t("miniapp.blockNoPhotoTitle")}>
+              <Toggle checked={settings.blockNoPhoto} onChange={(v) => setField("blockNoPhoto", v)} />
+            </Row>
+            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.blockNoPhotoHint")}
+            </p>
+
+            <Divider />
+            <p className="text-[13px] font-medium mb-1.5">{t("miniapp.premiumJoinFilterTitle")}</p>
+            <SegmentedControl
+              value={settings.premiumJoinFilter}
+              onChange={(v) => setField("premiumJoinFilter", v)}
+              columns={3}
+              options={[
+                { value: "off", label: t("common.off") },
+                { value: "block_premium", label: t("miniapp.premiumJoinFilterBlockPremium") },
+                { value: "block_non_premium", label: t("miniapp.premiumJoinFilterBlockNonPremium") },
+              ]}
+            />
           </Collapsible>
         </CardSection>
       </Card>

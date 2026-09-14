@@ -11,6 +11,7 @@ import { classifyWithDeepseek } from "./deepseek";
 import { detectRestrictedContent, isNewMemberRestricted } from "./newMemberGuard";
 import { isNightModeActive } from "./nightMode";
 import { isRepeatOffender } from "./reputation";
+import { detectStrictContentViolation } from "./strictContentRules";
 
 /** §4.9: which detector produced the verdict — purely additive metadata, never
  * read by applyViolation/reputation.ts. Exists so the §4 shadow scorer
@@ -24,6 +25,7 @@ export type ModerationSource =
   | "profanity"
   | "spam-detector"
   | "flood"
+  | "strict-content"
   | "premium-ai";
 
 export interface ModerationVerdict {
@@ -126,6 +128,16 @@ export async function moderateMessage(
   }
 
   if (settings.antispam) {
+    // Opt-in "block outright" rules (§7.2 item 2) checked ahead of the
+    // pattern-based detectSpam below — an admin who turned one of these on
+    // wants zero tolerance, not just the usual severity-based leniency.
+    if (settings.strictContentRules?.length) {
+      const strictReason = detectStrictContentViolation(message, settings.strictContentRules, contentAllowlist);
+      if (strictReason) {
+        return { category: "spam", reason: strictReason, forceWarnOnly: false, source: "strict-content", contentAllowlist };
+      }
+    }
+
     const spamResult = detectSpam(message, contentAllowlist);
     if (spamResult.matched) {
       const forceWarnOnly = isFirstMessage && spamResult.severity === "low" && !isKnownRepeatOffender;

@@ -8,6 +8,13 @@ const MAX_CACHED_TEXT_LENGTH = 500;
 
 const lastMessageKey = (chatId: number, userId: number) => `lastmsg:${chatId}:${userId}`;
 const authorKey = (chatId: number, messageId: number) => `msgauthor:${chatId}:${messageId}`;
+const recentMessagesKey = (chatId: number, userId: number) => `recentmsgs:${chatId}:${userId}`;
+// Bot API can only ever delete a message within ~48h of it being sent
+// anyway (see purgeRecentMessages), so keeping more than this many ids or
+// for longer than this window buys nothing — capped short on purpose, not
+// tied to the 30-day TTL_SECONDS the single-message caches above use.
+const RECENT_MESSAGES_MAX = 20;
+const RECENT_MESSAGES_TTL_SECONDS = 60 * 60 * 48;
 // Global, not per-chat: Telegram usernames are unique bot-wide, and the
 // God Mode "@username -> ban" tool needs to resolve one without knowing
 // which group the user is in. getChat("@username") only reliably resolves
@@ -41,7 +48,25 @@ export async function recordMessage(
   pipeline.set(lastMessageKey(chatId, userId), messageId, { ex: TTL_SECONDS });
   pipeline.set(authorKey(chatId, messageId), cached, { ex: TTL_SECONDS });
   if (username) pipeline.set(usernameKey(username), userId, { ex: TTL_SECONDS });
+  // Feeds purgeRecentMessages (§7.2 item 4: clean up a banned user's other
+  // recent messages, not just the one that triggered the ban) — a short,
+  // separately-capped list rather than reusing lastMessageKey/authorKey,
+  // which only ever remember the single most recent message.
+  const key = recentMessagesKey(chatId, userId);
+  pipeline.lpush(key, messageId);
+  pipeline.ltrim(key, 0, RECENT_MESSAGES_MAX - 1);
+  pipeline.expire(key, RECENT_MESSAGES_TTL_SECONDS);
   await pipeline.exec();
+}
+
+/** Message ids this user is known to have sent in this chat recently (newest
+ * first, capped at RECENT_MESSAGES_MAX / ~48h) — used to delete a banned
+ * user's other recent messages, not just the one that triggered the ban.
+ * Best-effort by nature: only covers messages recordMessage actually saw
+ * live, same caveat as getLastMessageId. */
+export async function getRecentMessageIds(chatId: number, userId: number): Promise<number[]> {
+  const ids = await getRedis().lrange<number>(recentMessagesKey(chatId, userId), 0, RECENT_MESSAGES_MAX - 1);
+  return (ids ?? []).filter((n) => Number.isFinite(n));
 }
 
 /** Best-effort — null if this username was never seen by the bot (or its

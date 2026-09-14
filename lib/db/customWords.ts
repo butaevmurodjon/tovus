@@ -7,7 +7,15 @@ const key = (chatId: number) => `group:${chatId}:customwords`;
 
 export async function getCustomWords(chatId: number): Promise<string[]> {
   const words = await getRedis().smembers<string[]>(key(chatId));
-  return (words ?? []).sort();
+  // Upstash's REST client auto-deserializes a set member that looks like a
+  // JSON number (e.g. someone added "950316066" as a custom word — a phone
+  // number/ID they wanted filtered) back into a JS `number`, even though
+  // every caller here is typed `string[]`. Real incident (2026-09-14): that
+  // exact member crashed EVERY message in a chat with profanityFilter on —
+  // buildCustomWordsRegex called `.trim()` on it and threw "w.trim is not a
+  // function", silently 500ing the webhook for that whole chat. Coerce at
+  // the source so no downstream caller has to know about this quirk.
+  return (words ?? []).map(String).sort();
 }
 
 export function normalizeCustomWord(raw: string): string | null {

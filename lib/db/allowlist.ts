@@ -13,7 +13,11 @@ const key = (chatId: number) => `group:${chatId}:allowlist`;
 
 export async function getAllowlist(chatId: number): Promise<string[]> {
   const entries = await getRedis().smembers<string[]>(key(chatId));
-  return (entries ?? []).sort();
+  // Same Upstash quirk as lib/db/customWords.ts's getCustomWords: a set
+  // member that looks like a JSON number comes back as a JS `number`, not a
+  // string, even though this is typed `string[]` everywhere it's consumed.
+  // Coerce at the source, not in every downstream .includes()/.trim() caller.
+  return (entries ?? []).map(String).sort();
 }
 
 /** Lowercased, trimmed, length-capped. A bare `@channel` handle is stored as

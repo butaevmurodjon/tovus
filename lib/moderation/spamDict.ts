@@ -159,6 +159,21 @@ export const SCAM_PATTERNS: string[] = [
   "issiq videolar",
   "issiq rasmlar",
   "virtual suhbat",
+  // Paid academic-fraud ("ghostwriting") ad template, uz-latin — coursework/
+  // diploma/HEMIS-assignment writing services. The 2026-08-25 fix (CTA_PHRASES'
+  // "biodagi grupp"/"lichga yozing" stems) only covers this genre when the ad
+  // happens to use one of those exact DM-redirect verbs; a real example
+  // (2026-09-14, farpilive_chat) used a noun-form CTA ("Murojaat uchun: LICHKA")
+  // that matches none of them, and carried zero link/@mention/forward, so
+  // detectSpam's CTA-pairing rules (which all require a link/mention/forward)
+  // never got a chance to fire either — needed standalone phrases from the
+  // pitch body itself, same fix shape as the "18+ content" block above. Kept to
+  // wording distinctive of the paid-service sales pitch (refund guarantee,
+  // "guaranteed defense") — not bare vocabulary like "kurs ishi"/"diplom ishi"
+  // that real students use constantly discussing their own coursework.
+  "pulni qaytarish kafolati",
+  "kafolatli himoya",
+  "bugun yozing, ertaga ish tayyor",
 ];
 
 /**

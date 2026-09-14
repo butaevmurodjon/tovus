@@ -20,6 +20,11 @@
  * production, and the real 30-day stats pulled from production Redis on
  * 2026-09-11 (6 groups, 1079 moderation actions) — no invented numbers.
  *
+ * 2026-09-14: added posts 5-6 (install guide, settings/features map) after
+ * reviewing @lolsAntiSpam's two Telegraph posts (install guide + settings
+ * menu) for gaps — see inline comments on those two posts for what was
+ * kept, trimmed, or skipped.
+ *
  * IMPORTANT — before running this: delete the 4 old plain-text posts in
  * @tovus_antispam manually (long-press → Delete in the Telegram app). The
  * Bot API has no "list channel messages" call, and the old script never
@@ -124,6 +129,67 @@ PRO — 199 ⭐/мес: ИИ-модерация, общий бан-лист, а�
 Abadiy bepul: so'kinish filtri, antispam, anti-skam, CAS, kapcha, antireyd — istalgan hajmdagi guruhlar uchun.
 
 PRO — oyiga 199 ⭐: sun'iy intellekt, umumiy ban-ro'yxati, analitika.`,
+
+  // 5 — install guide. Modelled on @lolsAntiSpam's Telegraph install post
+  // (t.me/lolsAntiSpam's "как добавить бота" page) but trimmed to a channel
+  // post: same "which rights, minimum required" structure, no screenshot
+  // (we don't have one staged), no counterfeit-bot warning (not a problem
+  // we have — @TovusBot has no known impersonators).
+  `<b>🚀 Как добавить бота</b>
+
+1. Группа → Управление группой → Администраторы → Добавить администратора
+2. Найти @TovusBot → выдать права
+3. Минимум нужно: <b>Удаление сообщений</b> и <b>Ограничение участников</b> — без них модерация и капча не сработают
+
+После добавления бот сам напишет в группу. Донастройка — через Mini App, отдельный сайт не нужен.
+
+<b>🇺🇿 Botni qanday qo'shish kerak</b>
+
+1. Guruh → Guruhni boshqarish → Administratorlar → Administrator qo'shish
+2. @TovusBot ni toping → huquqlarni bering
+3. Kamida kerak: <b>Xabarlarni o'chirish</b> va <b>A'zolarni cheklash</b> — bularsiz moderatsiya va kapcha ishlamaydi
+
+Qo'shgandan keyin bot guruhga o'zi yozadi. Qo'shimcha sozlash — Mini App orqali, alohida sayt shart emas.`,
+
+  // 6 — settings/features map. Modelled on @lolsAntiSpam's Telegraph
+  // "Главное меню" settings index, but collapsed: Lols links out to ~9
+  // separate Telegraph sub-pages because its own config lives across many
+  // bot-command screens; we have one Mini App screen for all of it, so this
+  // is a single post describing sections, not a tree of links. The "Важно
+  // знать" bullets mirror Lols' honesty about bot-native limits (history,
+  // other bots, hard deletes) — trimmed from Lols' ~7 to the 3 that are
+  // actually true for us and actually change what an admin expects.
+  `<b>⚙️ Что можно настроить</b>
+
+Всё в одном месте — Mini App внутри Telegram, без внешних сайтов и паролей:
+
+🛡 <b>Защита</b> — мат, спам, скам, CAS, ИИ-модерация (PRO), тихий час, сервисные сообщения
+👤 <b>Новые участники</b> — капча, антирейд, временное ограничение прав
+⚖️ <b>Наказания</b> — предупреждения с эскалацией, голосование за снятие
+📖 <b>Вайтлист</b> — свои слова и ссылки, которые никогда не банятся
+📊 <b>Журнал</b> — что и почему удалено, восстановление в один клик
+🔔 <b>Канал-лог</b> — дублировать действия бота в отдельный канал
+
+<b>Важно знать:</b>
+▪️ Бот видит только сообщения после добавления — историю до этого не читает
+▪️ Не координируется с другими ботами-модераторами в чате
+▪️ «Восстановить» в журнале — это заново отправить текст: Telegram не даёт отменить само удаление
+
+<b>🇺🇿 Nimalarni sozlash mumkin</b>
+
+Hammasi bitta joyda — Telegram ichidagi Mini App, tashqi sayt va parolsiz:
+
+🛡 <b>Himoya</b> — so'kinish, spam, skam, CAS, sun'iy intellekt (PRO), tungi rejim, servis xabarlari
+👤 <b>Yangi a'zolar</b> — kapcha, antireyd, vaqtinchalik huquq cheklash
+⚖️ <b>Jazolar</b> — bosqichma-bosqich ogohlantirish, bekor qilish uchun ovoz berish
+📖 <b>Oq ro'yxat</b> — hech qachon ban qilinmaydigan so'z va havolalar
+📊 <b>Jurnal</b> — nima va nega o'chirilgani, bir bosishda qaytarish
+🔔 <b>Kanal-jurnal</b> — bot harakatlarini alohida kanalga dublikatlash
+
+<b>Bilib qo'ying:</b>
+▪️ Bot faqat qo'shilgandan keyingi xabarlarni ko'radi — avvalgi tarixni o'qimaydi
+▪️ Chatdagi boshqa moderator-botlar bilan bog'lanmaydi
+▪️ Jurnaldagi «Qaytarish» — matnni qayta yuborish: Telegram o'chirishning o'zini bekor qilishga imkon bermaydi`,
 ];
 
 const descRes = await api("setChatDescription", { chat_id: CHANNEL, description });

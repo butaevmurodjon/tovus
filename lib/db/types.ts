@@ -161,6 +161,16 @@ export interface GroupSettings {
    * rejects in-group advertising as a default; this only ever runs because an
    * owner opted in, never silently. */
   promoChannelOptIn: boolean;
+
+  /** On by default, opt-out: when a non-admin member adds another bot to the
+   * group, kick it immediately (ban+unban, so an admin can deliberately
+   * re-add it later without a lingering ban). Closes the standard bypass
+   * spammers use against every Bot-API moderator — a bot never sees another
+   * bot's own messages (see bot.ts's join handler for the same "bots are
+   * mutually blind" reasoning), so a spammer who gets their own bot into the
+   * chat can post through it unmoderated. Admins can still add any bot they
+   * want; this only blocks non-admin adds. ROADMAP.md §7.2 item 1. */
+  blockUnauthorizedBots: boolean;
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -204,6 +214,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   ownerChannelId: null,
   ownerChannelUsername: null,
   promoChannelOptIn: false,
+  blockUnauthorizedBots: true,
 };
 
 export interface JournalEntry {

@@ -608,6 +608,17 @@ export default function GroupSettingsPage() {
               />
             </div>
           )}
+
+          <Divider />
+          <Row label={t("miniapp.blockUnauthorizedBotsTitle")}>
+            <Toggle
+              checked={settings.blockUnauthorizedBots}
+              onChange={(v) => setField("blockUnauthorizedBots", v)}
+            />
+          </Row>
+          <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
+            {t("miniapp.blockUnauthorizedBotsHint")}
+          </p>
         </CardSection>
       </Card>
 

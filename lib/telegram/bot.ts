@@ -544,6 +544,42 @@ export function getBot(): Bot {
       }
       const newMembers = message.new_chat_members.filter((member) => !member.is_bot);
       await Promise.all(newMembers.map((member) => markNewMember(chat.id, member.id)));
+
+      // ROADMAP.md §7.2 item 1: a spammer's own bot, added by a non-admin
+      // member, would otherwise post through the chat completely unmoderated
+      // — bots are mutually blind on the Bot API (see the quoted-.apk /
+      // cross-bot reasoning elsewhere in this file), so no content filter
+      // here ever sees what it sends. Admins can still add any bot they
+      // want; only a non-admin inviter triggers the kick. `message.from` is
+      // absent for messages posted as the chat's own anonymous-admin
+      // identity — treated as trusted rather than kicked on ambiguous data.
+      const newBots = message.new_chat_members.filter((member) => member.is_bot);
+      if (newBots.length && (settings?.blockUnauthorizedBots ?? true)) {
+        const inviterId = message.from?.id;
+        const inviterIsAdmin = inviterId === undefined || (await isChatAdmin(ctx.api, chat.id, inviterId));
+        if (!inviterIsAdmin) {
+          const me = await ctx.api.getMe();
+          await Promise.all(
+            newBots
+              .filter((b) => b.id !== me.id)
+              .map(async (b) => {
+                // ban+unban rather than a plain kick's leaveChat-equivalent —
+                // Bot API has no "remove without ban", and unbanning right
+                // after means the *bot* isn't blacklisted, only removed: an
+                // admin can deliberately re-add it later without hitting a
+                // lingering ban.
+                const kicked = await ctx.api.banChatMember(chat.id, b.id).catch(() => false);
+                if (kicked) {
+                  await ctx.api.unbanChatMember(chat.id, b.id).catch(() => {});
+                  await ctx.api
+                    .sendMessage(chat.id, t(settings?.lang ?? "ru", "bot.unauthorizedBotKicked", { user: displayName(b) }))
+                    .catch(() => {});
+                }
+              })
+          );
+        }
+      }
+
       if (settings) {
         await Promise.all(
           newMembers.map(async (member) => {

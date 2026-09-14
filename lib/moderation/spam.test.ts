@@ -338,6 +338,25 @@ describe("detectSpam", () => {
     expect(result.reason).toContain("скам-схема");
   });
 
+  it("flags a paid coursework-writing ad with no link/mention/forward, uz-latin noun-form CTA (2026-09-14 real example, farpilive_chat)", () => {
+    // "Murojaat uchun: LICHKA" (a noun-form DM redirect) matches none of
+    // CTA_PHRASES' verb-form stems ("lichga yozing" etc.), and with zero
+    // link/@mention/forward, detectSpam's CTA-pairing rules never even get a
+    // chance to fire — needed standalone phrases from the pitch body itself.
+    const text = [
+      "🎓 Kurs ishi — 100% original, plagiat tekshiruvidan o'tgan",
+      "✅ Diplom ishi (BMI) — kafolatli himoya",
+      "✅ HEMIS topshiriqlari — to'liq tayyor va yuklashga tayyor",
+      "7️⃣ Pulni qaytarish kafolati — agar ish topshirilmasa qaytadi!",
+      "Murojaat uchun: LICHKA",
+      "📆 Bugun yozing, ertaga ish tayyor!",
+    ].join("\n");
+    const result = detectSpam(msg(text));
+    expect(result.matched).toBe(true);
+    expect(result.severity).toBe("high");
+    expect(result.reason).toContain("скам-схема");
+  });
+
   it("does not flag a legitimate plain job offer with no scam-scheme phrases", () => {
     const result = detectSpam(
       msg("Ищем работников на склад. Опыт не нужен, фиксированная ставка за час, график 5/2.")

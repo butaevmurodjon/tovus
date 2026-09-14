@@ -224,6 +224,13 @@ export interface GroupSettings {
    * to remove an already-placed reaction, same limitation @LolsBot's own
    * docs note, so the response is a short mute rather than a deletion. */
   reactionSpamEnabled: boolean;
+
+  /** Off by default (ROADMAP.md §7.3 "OCR текста с картинок"): reads text
+   * baked into a photo (lib/moderation/ocr.ts, external OCR.space API — see
+   * that module's doc comment for the accepted legal-risk tradeoff) and
+   * runs it through the same profanity/spam checks as ordinary text. No
+   * effect at all unless `OCR_API_KEY` is also set bot-wide. */
+  ocrEnabled: boolean;
 }
 
 export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "createdAt" | "lang"> = {
@@ -276,6 +283,7 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   premiumJoinFilter: "off",
   minAccountAgeDays: 0,
   reactionSpamEnabled: false,
+  ocrEnabled: false,
 };
 
 export interface JournalEntry {

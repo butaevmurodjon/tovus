@@ -1,5 +1,7 @@
+import type { Api } from "grammy";
 import type { Message } from "grammy/types";
 import type { GroupSettings, ViolationCategory } from "@/lib/db/types";
+import { extractTextFromPhoto } from "./ocr";
 import { getCustomWords } from "@/lib/db/customWords";
 import { getAllowlist } from "@/lib/db/allowlist";
 import { isProActive } from "@/lib/billing/plan";
@@ -53,11 +55,25 @@ export interface ModerationVerdict {
 export async function moderateMessage(
   message: Message,
   settings: GroupSettings,
-  options: { isEdit?: boolean } = {}
+  options: { isEdit?: boolean; api?: Api } = {}
 ): Promise<ModerationVerdict | null> {
-  const text = message.text ?? message.caption ?? "";
   const chatId = settings.chatId;
   const userId = message.from?.id;
+
+  // §7.3 "OCR текста с картинок": a spam pitch baked into the image itself,
+  // with little/no caption, would otherwise never reach any text-based
+  // check below. `api` is optional (tests / callers that never pass photos
+  // through this path don't need it) — no api means this silently no-ops,
+  // same as the module's own missing-config/budget/failure cases.
+  let text = message.text ?? message.caption ?? "";
+  let spamCheckMessage: Message = message;
+  if (options.api && settings.ocrEnabled && message.photo?.length && (settings.profanityFilter || settings.antispam)) {
+    const ocrText = await extractTextFromPhoto(options.api, message.photo).catch(() => null);
+    if (ocrText) {
+      text = text ? `${text}\n${ocrText}` : ocrText;
+      spamCheckMessage = { ...message, caption: text, caption_entities: undefined };
+    }
+  }
 
   // Ahead of everything else, including the consumeNewMemberFlag read below:
   // during quiet hours every member message goes regardless of content, so
@@ -132,13 +148,13 @@ export async function moderateMessage(
     // pattern-based detectSpam below — an admin who turned one of these on
     // wants zero tolerance, not just the usual severity-based leniency.
     if (settings.strictContentRules?.length) {
-      const strictReason = detectStrictContentViolation(message, settings.strictContentRules, contentAllowlist);
+      const strictReason = detectStrictContentViolation(spamCheckMessage, settings.strictContentRules, contentAllowlist);
       if (strictReason) {
         return { category: "spam", reason: strictReason, forceWarnOnly: false, source: "strict-content", contentAllowlist };
       }
     }
 
-    const spamResult = detectSpam(message, contentAllowlist);
+    const spamResult = detectSpam(spamCheckMessage, contentAllowlist);
     if (spamResult.matched) {
       const forceWarnOnly = isFirstMessage && spamResult.severity === "low" && !isKnownRepeatOffender;
       return { category: "spam", reason: spamResult.reason ?? "спам", forceWarnOnly, source: "spam-detector", contentAllowlist };

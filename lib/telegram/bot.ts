@@ -953,7 +953,7 @@ export function getBot(): Bot {
       }
     }
 
-    const verdict = await moderateMessage(message, settings, { isEdit });
+    const verdict = await moderateMessage(message, settings, { isEdit, api: ctx.api });
     // §4 Этап 1, shadow-only: computed and logged after the real verdict is
     // already final, never allowed to affect it (see scoring.ts). Scheduled
     // via Next's after() rather than awaited, so it truly doesn't add to the

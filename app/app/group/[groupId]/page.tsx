@@ -983,6 +983,14 @@ export default function GroupSettingsPage() {
             <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
               {t("miniapp.reactionSpamHint")}
             </p>
+
+            <Divider />
+            <Row label={t("miniapp.ocrTitle")}>
+              <Toggle checked={settings.ocrEnabled} onChange={(v) => setField("ocrEnabled", v)} />
+            </Row>
+            <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.ocrHint")}
+            </p>
           </Collapsible>
         </CardSection>
       </Card>

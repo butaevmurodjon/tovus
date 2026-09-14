@@ -1,6 +1,7 @@
 import type { Api } from "grammy";
 import type { User } from "grammy/types";
 import { getRedis } from "./redis";
+import { listAllGroupIds } from "./groups";
 
 // Reverse index (userId -> chatIds they administer) so the Mini App dashboard
 // doesn't have to scan every group the bot is in and call getChatMember on
@@ -114,6 +115,17 @@ export async function getUserAdminGroupIds(userId: number): Promise<number[]> {
 export async function getGroupAdminIds(chatId: number): Promise<number[]> {
   const ids = await getRedis().smembers<string[]>(groupAdminsKey(chatId));
   return (ids ?? []).map(Number);
+}
+
+/** Every user who administers at least one group the bot manages, deduped —
+ * the audience for the owner's "Рассылка админам групп" broadcast
+ * (lib/telegram/broadcast.ts's broadcastToAdmins). O(groups), same shape as
+ * broadcastToAllGroups itself; fine at this scale (a handful of Redis SMEMBERS
+ * calls), not worth a dedicated reverse index for a feature used this rarely. */
+export async function listAllAdminUserIds(): Promise<number[]> {
+  const groupIds = await listAllGroupIds();
+  const idLists = await Promise.all(groupIds.map((chatId) => getGroupAdminIds(chatId)));
+  return Array.from(new Set(idLists.flat()));
 }
 
 /** Called when the bot leaves/is removed — drops this chat out of every

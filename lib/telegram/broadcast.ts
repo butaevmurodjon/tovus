@@ -1,6 +1,9 @@
 import type { Api } from "grammy";
+import type { InlineKeyboardMarkup } from "grammy/types";
 import { listAllGroupIds } from "@/lib/db/groups";
+import { listAllAdminUserIds } from "@/lib/db/admins";
 import { getRedis } from "@/lib/db/redis";
+import { supportUrl } from "./support";
 
 // Telegram throttles bulk sendMessage calls to different chats at roughly
 // ~30/sec bot-wide. A small batch + pause keeps a broadcast to many groups
@@ -19,7 +22,12 @@ export interface BroadcastResult {
   failed: number;
 }
 
-async function sendToChats(api: Api, chatIds: number[], text: string): Promise<BroadcastResult> {
+async function sendToChats(
+  api: Api,
+  chatIds: number[],
+  text: string,
+  replyMarkup?: InlineKeyboardMarkup
+): Promise<BroadcastResult> {
   let sent = 0;
   let failed = 0;
 
@@ -28,7 +36,7 @@ async function sendToChats(api: Api, chatIds: number[], text: string): Promise<B
     const results = await Promise.all(
       batch.map((chatId) =>
         api
-          .sendMessage(chatId, text)
+          .sendMessage(chatId, text, replyMarkup ? { reply_markup: replyMarkup } : undefined)
           .then(() => true)
           .catch(() => false)
       )
@@ -44,6 +52,30 @@ async function sendToChats(api: Api, chatIds: number[], text: string): Promise<B
 /** Sends `text` as a plain message to every group the bot currently manages. */
 export async function broadcastToAllGroups(api: Api, text: string): Promise<BroadcastResult> {
   return sendToChats(api, await listAllGroupIds(), text);
+}
+
+/**
+ * Sends `text` in PRIVATE chat to every user who administers at least one
+ * group the bot manages — distinct audience from broadcastToAllGroups
+ * (which posts into the group chats themselves). Only reaches admins who
+ * have ever started a DM with the bot: Telegram silently refuses
+ * sendMessage to a private chat the bot has no prior conversation with, and
+ * that failure is indistinguishable here from any other delivery failure —
+ * both just count toward `failed`, same as broadcastToAllGroups already
+ * does for a group the bot got kicked from. No separate "has this user
+ * started the bot" tracking needed; Telegram enforces it for us.
+ *
+ * Always attaches a "Написать в поддержку" button (supportUrl with no
+ * groupId — the admin may run several groups, so the ticket isn't tied to
+ * one) so a broadcast (e.g. an incident notice) has an immediate way to
+ * reply to the bot owner, not just read silently.
+ */
+export async function broadcastToAdmins(api: Api, text: string): Promise<BroadcastResult> {
+  const url = supportUrl();
+  const replyMarkup: InlineKeyboardMarkup | undefined = url
+    ? { inline_keyboard: [[{ text: "💬 Связь с поддержкой", url }]] }
+    : undefined;
+  return sendToChats(api, await listAllAdminUserIds(), text, replyMarkup);
 }
 
 /** Sends `text` to exactly the given chats — the M4 cross-group admin

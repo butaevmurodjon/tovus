@@ -375,7 +375,7 @@ export default function GroupSettingsPage() {
               }}
               className="w-full"
             >
-              {t("miniapp.supportEntryButton")}
+              {t("bot.supportEntryButton")}
             </Button>
           </CardSection>
         </Card>

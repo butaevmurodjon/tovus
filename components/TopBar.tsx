@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback } from "react";
 import { useApp } from "@/contexts/AppProvider";
+import { useTelegramBackButton } from "@/lib/miniapp/telegram";
 import type { Lang } from "@/lib/i18n";
 
 export function TopBar({
@@ -14,6 +17,14 @@ export function TopBar({
   showLangSwitch?: boolean;
 }) {
   const { lang, setLang, t } = useApp();
+  const router = useRouter();
+  // Native chevron in Telegram's own chrome — see useTelegramBackButton's doc
+  // comment for why this matters beyond just "nice to have". The in-page ←
+  // below stays too: it's what dev/browser and pre-6.1 clients get instead.
+  const goBack = useCallback(() => {
+    if (backHref) router.push(backHref);
+  }, [router, backHref]);
+  useTelegramBackButton(backHref ? goBack : null);
 
   return (
     <header

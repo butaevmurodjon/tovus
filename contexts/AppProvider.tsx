@@ -15,12 +15,16 @@ interface AppContextValue {
   setLang: (lang: Lang) => void;
   t: (key: string, params?: Record<string, string | number>) => string;
   fetcher: Fetcher;
+  /** `g<chatId>` from a `/panel` deep link (`?startapp=...`), or null.
+   * Consumed once by the dashboard root to redirect straight into that
+   * group — see app/app/page.tsx. */
+  startParam: string | null;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const { initData, inTelegram, bootstrapped } = useTelegramWebApp();
+  const { initData, inTelegram, bootstrapped, startParam } = useTelegramWebApp();
   const [status, setStatus] = useState<Status>("loading");
   const [user, setUser] = useState<TelegramWebAppUser | null>(null);
   const [isOwner, setIsOwner] = useState(false);
@@ -65,7 +69,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [lang]
   );
 
-  const value: AppContextValue = { status, user, isOwner, lang, setLang, t, fetcher };
+  const value: AppContextValue = { status, user, isOwner, lang, setLang, t, fetcher, startParam };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

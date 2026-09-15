@@ -8,13 +8,25 @@ export function OwnerNav() {
   const pathname = usePathname();
   const { t } = useApp();
 
+  // "Баны" folded into "Действия" and "Инструменты" renamed to it (FAANG-audit
+  // PR-4) — owner/tools and owner/bans merged into one screen at
+  // /app/owner/actions, so two tabs became one, freeing a 5th slot — filled
+  // now by "Политика" (§5, the deferred item, built once the owner said to
+  // go ahead despite the risk).
   const items = [
     { href: "/app/owner", label: t("miniapp.ownerNavDashboard"), icon: "🛡" },
     { href: "/app/owner/shadow", label: t("miniapp.ownerNavShadow"), icon: "🎯" },
-    { href: "/app/owner/bans", label: t("miniapp.ownerNavBans"), icon: "⛔" },
+    { href: "/app/owner/actions", label: t("miniapp.ownerNavActions"), icon: "🔧" },
+    { href: "/app/owner/policy", label: t("miniapp.ownerNavPolicy"), icon: "📐" },
     { href: "/app/owner/broadcast", label: t("miniapp.ownerNavBroadcast"), icon: "📣" },
-    { href: "/app/owner/tools", label: t("miniapp.ownerNavTools"), icon: "🔧" },
   ];
+
+  // Longest-matching-href wins — "/app/owner" would otherwise prefix-match
+  // every other tab's href if compared in list order (see BottomNav's same
+  // fix for the identical shape of bug).
+  const activeHref = [...items].sort((a, b) => b.href.length - a.href.length).find((item) =>
+    pathname === item.href || pathname?.startsWith(`${item.href}/`)
+  )?.href;
 
   return (
     <nav
@@ -27,7 +39,7 @@ export function OwnerNav() {
       }}
     >
       {items.map((item) => {
-        const active = pathname === item.href;
+        const active = item.href === activeHref;
         return (
           <Link
             key={item.href}

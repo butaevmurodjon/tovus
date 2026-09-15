@@ -2,35 +2,51 @@ import { getRedis } from "./redis";
 import { DEFAULT_GROUP_SETTINGS, type GroupSettings } from "./types";
 import type { Lang } from "@/lib/i18n";
 import { DEFAULT_LANG } from "@/lib/i18n";
+import { getPolicy, type PolicyKey } from "./policy";
 
 const settingsKey = (chatId: number) => `group:${chatId}:settings`;
 const whitelistKey = (chatId: number) => `group:${chatId}:whitelist`;
 const allGroupsKey = "bot:groups";
 
+type RawGroupSettings = Partial<GroupSettings> & { chatId: number };
+
+/** Sparse, exactly what's in Redis — no defaults or policy merged in.
+ * Internal only: every external caller wants the resolved getGroupSettings
+ * below. Only updateGroupSettings and clearGroupOverrides read this
+ * directly, because they need to know which fields this group has actually
+ * touched, as opposed to which fields merely resolve to something right now. */
+async function getRawGroupSettings(chatId: number): Promise<RawGroupSettings | null> {
+  return getRedis().get<RawGroupSettings>(settingsKey(chatId));
+}
+
+async function saveRawGroupSettings(raw: RawGroupSettings): Promise<void> {
+  await getRedis().set(settingsKey(raw.chatId), raw);
+}
+
 export async function registerGroup(chatId: number, title: string, lang?: Lang): Promise<void> {
   const redis = getRedis();
   await redis.sadd(allGroupsKey, chatId);
-  const current = await getGroupSettings(chatId);
+  const current = await getRawGroupSettings(chatId);
   if (!current) {
-    const settings: GroupSettings = {
+    // Sparse on purpose (FAANG-audit §5, bot-wide default policy — see
+    // lib/db/policy.ts) — NOT spread with DEFAULT_GROUP_SETTINGS the way
+    // this used to work. A brand-new group now inherits the policy (and,
+    // for anything policy doesn't set, the hardcoded default) for every
+    // field it never explicitly touches. getGroupSettings below resolves
+    // the gaps on every read, so there is no correctness gap from leaving
+    // them out of storage — only new groups get to benefit from policy at
+    // all, which is the point.
+    const settings: RawGroupSettings = {
       chatId,
       title,
-      ...DEFAULT_GROUP_SETTINGS,
       lang: lang ?? DEFAULT_LANG,
       createdAt: Date.now(),
     };
     await redis.set(settingsKey(chatId), settings);
-  } else {
-    // A group registered before a schema change is missing whatever fields were
-    // added since — merge those defaults in so older groups don't silently fall
-    // back to `undefined` for new features instead of the intended default.
-    const backfill: Partial<GroupSettings> = {};
-    for (const k of Object.keys(DEFAULT_GROUP_SETTINGS) as (keyof typeof DEFAULT_GROUP_SETTINGS)[]) {
-      if (!(k in current)) (backfill as Record<string, unknown>)[k] = DEFAULT_GROUP_SETTINGS[k];
-    }
-    if (current.title !== title || Object.keys(backfill).length > 0) {
-      await saveGroupSettings({ ...current, ...backfill, title });
-    }
+  } else if (current.title !== title) {
+    // Telegram's own chat title changed — the one thing here that's
+    // genuinely per-group data, always written regardless of policy.
+    await saveRawGroupSettings({ ...current, title });
   }
 }
 
@@ -50,19 +66,26 @@ export async function isRegisteredGroup(chatId: number): Promise<boolean> {
   return (await getRedis().sismember(allGroupsKey, chatId)) === 1;
 }
 
+/**
+ * Resolution order, low → high precedence: hardcoded DEFAULT_GROUP_SETTINGS
+ * < bot-wide policy (lib/db/policy.ts) < this group's own stored fields.
+ * A field only ever lands in the group's raw storage when an admin/owner
+ * actually changed it — never at registration any more (see registerGroup)
+ * — so policy genuinely reaches brand-new groups.
+ *
+ * Every group registered before this shipped already has a FULL raw blob
+ * (the old registerGroup used to spread DEFAULT_GROUP_SETTINGS into every
+ * new group) — for them every field already counts as "explicitly touched",
+ * so policy has zero effect on any group moderating live traffic today,
+ * until an owner explicitly opts one in via clearGroupOverrides. That's
+ * intentional, not a migration gap: shipping this must not silently change
+ * how any existing group is moderated.
+ */
 export async function getGroupSettings(chatId: number): Promise<GroupSettings | null> {
-  const data = await getRedis().get<GroupSettings>(settingsKey(chatId));
-  if (!data) return null;
-  // Groups registered before a schema change may be missing fields added since,
-  // and won't get backfilled until their next my_chat_member event (see
-  // registerGroup) — merge in defaults on every read so callers never see
-  // `undefined` for a setting that looks "on" in the UI (e.g. warnTtlDays
-  // turning into NaN math downstream).
-  return { ...DEFAULT_GROUP_SETTINGS, ...data };
-}
-
-export async function saveGroupSettings(settings: GroupSettings): Promise<void> {
-  await getRedis().set(settingsKey(settings.chatId), settings);
+  const raw = await getRawGroupSettings(chatId);
+  if (!raw) return null;
+  const policy = await getPolicy();
+  return { ...DEFAULT_GROUP_SETTINGS, ...policy, ...raw } as GroupSettings;
 }
 
 type SettingsPatch = Partial<Omit<GroupSettings, "chatId">>;
@@ -96,12 +119,39 @@ export const applyWarnLimitCascade: Cascade = (current, patch) => {
 const CASCADES: Cascade[] = [applyAntiraidCascade, applyWarnLimitCascade];
 
 export async function updateGroupSettings(chatId: number, patch: SettingsPatch): Promise<GroupSettings | null> {
-  const current = await getGroupSettings(chatId);
-  if (!current) return null;
-  const cascaded = CASCADES.reduce((p, cascade) => cascade(current, p), patch);
-  const next: GroupSettings = { ...current, ...cascaded };
-  await saveGroupSettings(next);
-  return next;
+  const raw = await getRawGroupSettings(chatId);
+  if (!raw) return null;
+  const policy = await getPolicy();
+  // Resolved view is only for the cascades' own decision-making (e.g. "what
+  // is the EFFECTIVE warn limit right now, including anything inherited
+  // from policy") — it is never what gets persisted below. What gets
+  // persisted is the existing raw blob plus the patch, still sparse, so
+  // changing one field can never freeze the other ~40 against future policy
+  // changes the way saving a fully-resolved object back would.
+  const resolvedCurrent = { ...DEFAULT_GROUP_SETTINGS, ...policy, ...raw } as GroupSettings;
+  const cascaded = CASCADES.reduce((p, cascade) => cascade(resolvedCurrent, p), patch);
+  const nextRaw: RawGroupSettings = { ...raw, ...cascaded };
+  await saveRawGroupSettings(nextRaw);
+  return { ...DEFAULT_GROUP_SETTINGS, ...policy, ...nextRaw } as GroupSettings;
+}
+
+/**
+ * Owner action: drop this group's own stored values for the given
+ * policy-eligible fields, so each one falls through to the bot-wide policy
+ * (or the hardcoded default, for anything policy doesn't set) on the very
+ * next read. This is the ONLY way an already-registered group — which
+ * stores a full raw blob, see registerGroup's comment — can adopt policy
+ * for fields it already has an explicit value for; nothing else clears a
+ * field back out of storage.
+ */
+export async function clearGroupOverrides(chatId: number, keys: PolicyKey[]): Promise<GroupSettings | null> {
+  const raw = await getRawGroupSettings(chatId);
+  if (!raw) return null;
+  const nextRaw = { ...raw };
+  for (const key of keys) delete (nextRaw as Record<string, unknown>)[key];
+  await saveRawGroupSettings(nextRaw);
+  const policy = await getPolicy();
+  return { ...DEFAULT_GROUP_SETTINGS, ...policy, ...nextRaw } as GroupSettings;
 }
 
 // --- Whitelist ---

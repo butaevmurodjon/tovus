@@ -19,7 +19,12 @@ export type OwnerAuditAction =
   | "group_unban"
   | "group_delete"
   | "group_resetrep"
-  | "daily_summary_toggle";
+  | "daily_summary_toggle"
+  | "pro_grant"
+  | "pro_revoke"
+  | "policy_set"
+  | "policy_clear"
+  | "policy_apply_to_group";
 
 export interface OwnerAuditEntry {
   id: string;

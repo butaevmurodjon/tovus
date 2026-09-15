@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useApp } from "@/contexts/AppProvider";
 import { TopBar } from "@/components/TopBar";
 import { StatusScreen } from "@/components/StatusScreen";
@@ -10,13 +11,28 @@ import { Card } from "@/components/Card";
 import { Skeleton } from "@/components/Skeleton";
 import type { AdminGroupSummary } from "@/lib/db/types";
 
+const START_PARAM_GROUP = /^g(-?\d+)$/;
+
 export default function DashboardPage() {
-  const { status, t, fetcher, isOwner } = useApp();
+  const { status, t, fetcher, isOwner, startParam } = useApp();
+  const router = useRouter();
   const [groups, setGroups] = useState<AdminGroupSummary[] | null>(null);
   const [error, setError] = useState(false);
 
+  // /panel's deep link (`?startapp=g-1001234567890`) used to land here inert
+  // — start_param went nowhere, so the group it was for was invisible and
+  // the person had to find it again in the list themselves. `replace`, not
+  // `push`: "back" from the group should return to a plain dashboard, not
+  // bounce right back into the same redirect.
+  const groupIdFromStartParam = startParam?.match(START_PARAM_GROUP)?.[1];
   useEffect(() => {
-    if (status !== "ready") return;
+    if (status === "ready" && groupIdFromStartParam) {
+      router.replace(`/app/group/${groupIdFromStartParam}`);
+    }
+  }, [status, groupIdFromStartParam, router]);
+
+  useEffect(() => {
+    if (status !== "ready" || groupIdFromStartParam) return;
     let cancelled = false;
     fetcher<{ groups: AdminGroupSummary[] }>("/api/miniapp/groups")
       .then((data) => !cancelled && setGroups(data.groups))
@@ -24,7 +40,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [status, fetcher]);
+  }, [status, groupIdFromStartParam, fetcher]);
 
   // This is the Mini App's entry screen and the only statically prerendered
   // one, so what it renders in the "loading" state is literally the first
@@ -32,7 +48,7 @@ export default function DashboardPage() {
   // real TopBar plus group-card placeholders here (instead of a bare centred
   // "Загрузка…") means the header is already in the HTML and the list fades
   // in underneath it rather than the whole screen re-laying out.
-  if (status === "loading") {
+  if (status === "loading" || groupIdFromStartParam) {
     return (
       <>
         <TopBar title={t("miniapp.dashboardTitle")} showLangSwitch />
@@ -59,7 +75,7 @@ export default function DashboardPage() {
       <TopBar title={t("miniapp.dashboardTitle")} showLangSwitch />
       <main className="flex-1 px-4 py-4">
         <p className="text-[13px] mb-4" style={{ color: "var(--ink-muted)" }}>
-          {t("miniapp.dashboardSubtitle")}
+          {t(isOwner ? "miniapp.dashboardSubtitleOwner" : "miniapp.dashboardSubtitle")}
         </p>
 
         {isOwner && (

@@ -30,6 +30,13 @@ const nextConfig: NextConfig = {
       { source: "/owner", destination: "/app/owner", permanent: true },
       { source: "/owner/:path*", destination: "/app/owner/:path*", permanent: true },
       { source: "/group/:path*", destination: "/app/group/:path*", permanent: true },
+      // owner/tools and owner/bans merged into owner/actions (FAANG-audit
+      // PR-4) — same "old link that can never be recalled" reasoning as the
+      // block above: BotFather-cached buttons, bookmarks, the bare
+      // /owner/tools links the `/owner/:path*` rule above still produces for
+      // anyone still holding one.
+      { source: "/app/owner/tools", destination: "/app/owner/actions", permanent: true },
+      { source: "/app/owner/bans", destination: "/app/owner/actions", permanent: true },
     ];
   },
 };

@@ -5,11 +5,11 @@ import { useApp } from "@/contexts/AppProvider";
 import { Card, CardSection } from "@/components/Card";
 import { Button } from "@/components/Button";
 import { Badge } from "@/components/Badge";
-import { Toggle } from "@/components/Toggle";
 import { confirmAction, haptic, hapticNotify } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
 import { ownerActionErrorText } from "@/lib/miniapp/ownerActionErrorText";
 import type { AiRule, AiRuleLabel } from "@/lib/db/aiRules";
+import type { GlobalBanEntry } from "@/lib/db/types";
 
 type ResolveResult =
   | { type: "message"; chatId: number; messageId: number; authorUserId: number | null; text: string | null }
@@ -29,9 +29,31 @@ function resolveErrorText(error: unknown): string {
   }
 }
 
+function formatDate(ts: number, lang: string): string {
+  return new Date(ts).toLocaleString(lang === "uz" ? "uz-UZ" : "ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-export default function OwnerToolsPage() {
-  const { fetcher } = useApp();
+/**
+ * "Действие" — единый owner-флоу (FAANG-audit PR-4), слияние бывших
+ * owner/tools (резолвер ссылки/юзернейма + обучение ИИ) и owner/bans
+ * (список глобальных банов). Раньше это были два разных экрана без общей
+ * логики — не было очевидно, что оба существуют и чем отличаются. Порядок
+ * секций отражает частоту использования: резолвер (самое частое) → баны
+ * (список + быстрый бан по ID, когда ссылки нет) → обучение ИИ → личные
+ * напоминалки (реже всего).
+ *
+ * i18n-политика для этого файла: owner-only экраны намеренно НЕ переведены
+ * (владелец бота один и русскоязычный) — в отличие от админских экранов
+ * (group/[id]/*), которые обязаны идти через t(). Не путать одно с другим.
+ */
+export default function OwnerActionsPage() {
+  const { lang, fetcher } = useApp();
   const [toast, setToast] = useState<string | null>(null);
 
   function flash(text: string) {
@@ -39,30 +61,7 @@ export default function OwnerToolsPage() {
     setTimeout(() => setToast((cur) => (cur === text ? null : cur)), 2600);
   }
 
-  // --- Section: owner-only reminder notes ---------------------------------
-  // Sticky checklist items, not functional controls — see lib/db/ownerReminders.ts.
-  // First entry: don't forget to add encryption-at-rest for the daily-summary
-  // buffer if its 48h retention window ever gets extended (2026-09-14 decision:
-  // keep it short-lived for now, see PRIVACY.md).
-  const [reminders, setReminders] = useState<Record<string, boolean> | null>(null);
-  useEffect(() => {
-    fetcher<{ reminders: Record<string, boolean> }>("/api/miniapp/owner/reminders")
-      .then((res) => setReminders(res.reminders))
-      .catch(() => setReminders({}));
-  }, [fetcher]);
-
-  async function toggleReminder(id: string, value: boolean) {
-    haptic("light");
-    setReminders((cur) => ({ ...cur, [id]: value }));
-    try {
-      await fetcher("/api/miniapp/owner/reminders", { method: "POST", body: JSON.stringify({ id, value }) });
-    } catch {
-      hapticNotify("error");
-      flash("Не удалось сохранить напоминание.");
-    }
-  }
-
-  // --- Section A: message-link / username resolver -----------------------
+  // --- Section: resolver ---------------------------------------------------
   const [input, setInput] = useState("");
   const [resolving, setResolving] = useState(false);
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
@@ -191,6 +190,7 @@ export default function OwnerToolsPage() {
       });
       hapticNotify("success");
       flash("Пользователь забанен везде.");
+      loadBans();
     } catch (error) {
       hapticNotify("error");
       flash(ownerActionErrorText(error));
@@ -199,7 +199,73 @@ export default function OwnerToolsPage() {
     }
   }
 
-  // --- Section B: AI rules -------------------------------------------------
+  // --- Section: global bans --------------------------------------------------
+  const [bans, setBans] = useState<GlobalBanEntry[] | null>(null);
+  const [bansError, setBansError] = useState(false);
+  const [banUserId, setBanUserId] = useState("");
+  const [banReason, setBanReason] = useState("");
+  const [unbanningId, setUnbanningId] = useState<number | null>(null);
+  const [banningManual, setBanningManual] = useState(false);
+
+  function loadBans() {
+    fetcher<{ bans: GlobalBanEntry[] }>("/api/miniapp/owner/globalban")
+      .then((d) => setBans(d.bans))
+      .catch(() => setBansError(true));
+  }
+
+  useEffect(() => {
+    loadBans();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function banManually() {
+    const id = Number(banUserId.trim());
+    if (!Number.isInteger(id) || id <= 0) {
+      flash("Введите корректный ID пользователя.");
+      return;
+    }
+    const confirmed = await confirmAction(`Забанить пользователя ${id} во ВСЕХ группах бота?`);
+    if (!confirmed) return;
+
+    haptic("medium");
+    setBanningManual(true);
+    try {
+      const result = await fetcher<{ bannedGroups: number; totalGroups: number }>(
+        "/api/miniapp/owner/globalban",
+        { method: "POST", body: JSON.stringify({ userId: id, reason: banReason.trim() }) }
+      );
+      setBanUserId("");
+      setBanReason("");
+      hapticNotify("success");
+      flash(`Забанен в ${result.bannedGroups} из ${result.totalGroups} групп.`);
+      loadBans();
+    } catch {
+      hapticNotify("error");
+      flash("Не удалось выполнить действие. Попробуйте ещё раз.");
+    } finally {
+      setBanningManual(false);
+    }
+  }
+
+  async function unban(entry: GlobalBanEntry) {
+    const confirmed = await confirmAction(`Снять глобальный бан с пользователя ${entry.userId}?`);
+    if (!confirmed) return;
+
+    haptic("light");
+    setUnbanningId(entry.userId);
+    try {
+      await fetcher(`/api/miniapp/owner/globalban?userId=${entry.userId}`, { method: "DELETE" });
+      setBans((cur) => cur?.filter((b) => b.userId !== entry.userId) ?? cur);
+      hapticNotify("success");
+    } catch {
+      hapticNotify("error");
+      flash("Не удалось выполнить действие. Попробуйте ещё раз.");
+    } finally {
+      setUnbanningId(null);
+    }
+  }
+
+  // --- Section: AI rules -------------------------------------------------
   const [rules, setRules] = useState<AiRule[] | null>(null);
   const [rulesError, setRulesError] = useState(false);
   const [ruleLabel, setRuleLabel] = useState<AiRuleLabel>("violation");
@@ -250,6 +316,25 @@ export default function OwnerToolsPage() {
       flash("Не удалось удалить правило.");
     } finally {
       setRemovingId(null);
+    }
+  }
+
+  // --- Section: reminders (personal checklist, not a real setting) --------
+  const [reminders, setReminders] = useState<Record<string, boolean> | null>(null);
+  useEffect(() => {
+    fetcher<{ reminders: Record<string, boolean> }>("/api/miniapp/owner/reminders")
+      .then((res) => setReminders(res.reminders))
+      .catch(() => setReminders({}));
+  }, [fetcher]);
+
+  async function toggleReminder(id: string, value: boolean) {
+    haptic("light");
+    setReminders((cur) => ({ ...cur, [id]: value }));
+    try {
+      await fetcher("/api/miniapp/owner/reminders", { method: "POST", body: JSON.stringify({ id, value }) });
+    } catch {
+      hapticNotify("error");
+      flash("Не удалось сохранить напоминание.");
     }
   }
 
@@ -340,6 +425,72 @@ export default function OwnerToolsPage() {
       </Card>
 
       <Card>
+        <CardSection title="Глобальный бан по ID" subtitle="Когда ссылки нет, но ID пользователя уже известен">
+          <div className="flex flex-col gap-2">
+            <input
+              value={banUserId}
+              onChange={(e) => setBanUserId(e.target.value)}
+              placeholder="ID пользователя"
+              inputMode="numeric"
+              className="rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+              style={{ borderColor: "var(--border-strong)" }}
+            />
+            <input
+              value={banReason}
+              onChange={(e) => setBanReason(e.target.value)}
+              placeholder="Причина (необязательно)"
+              className="rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+              style={{ borderColor: "var(--border-strong)" }}
+            />
+            <Button variant="danger" onClick={banManually} disabled={banningManual}>
+              {banningManual ? "Баним…" : "Забанить везде"}
+            </Button>
+          </div>
+        </CardSection>
+      </Card>
+
+      <Card>
+        <CardSection title="Глобальные баны">
+          {bansError && <p className="text-[12px]" style={{ color: "var(--ink-muted)" }}>Не удалось загрузить список.</p>}
+          {bans === null && !bansError && <p className="text-[12px]" style={{ color: "var(--ink-muted)" }}>Загрузка…</p>}
+          {bans?.length === 0 && (
+            <p className="text-[13px] text-center py-6" style={{ color: "var(--ink-muted)" }}>
+              Список пуст.
+            </p>
+          )}
+          <div className="flex flex-col gap-2">
+            {bans?.map((entry) => (
+              <div
+                key={entry.userId}
+                className="flex items-start justify-between gap-2 rounded-[var(--radius-sm)] border p-2.5"
+                style={{ borderColor: "var(--border)" }}
+              >
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium" style={{ color: "var(--ink)" }}>
+                    ID {entry.userId}
+                  </p>
+                  {entry.reason && (
+                    <p className="text-[12px] mt-0.5 break-words" style={{ color: "var(--ink-secondary)" }}>
+                      {entry.reason}
+                    </p>
+                  )}
+                  <p className="text-[11px] mt-1" style={{ color: "var(--ink-muted)" }}>
+                    {formatDate(entry.bannedAt, lang)}
+                    {/* `bannedBy` is absent on rows written before it was stored — show
+                        nothing for those rather than "актор 0". */}
+                    {typeof entry.bannedBy === "number" && entry.bannedBy > 0 ? ` · актор ${entry.bannedBy}` : ""}
+                  </p>
+                </div>
+                <Button variant="secondary" onClick={() => unban(entry)} disabled={unbanningId === entry.userId}>
+                  Разбанить
+                </Button>
+              </div>
+            ))}
+          </div>
+        </CardSection>
+      </Card>
+
+      <Card>
         <CardSection title="Обучение ИИ" subtitle="Эти правила добавляются к промпту DeepSeek для всех групп — примеры того, что считать нарушением или, наоборот, точно разрешать">
           {rulesError && <p className="text-[12px]" style={{ color: "var(--ink-muted)" }}>Не удалось загрузить правила.</p>}
 
@@ -406,17 +557,23 @@ export default function OwnerToolsPage() {
       <Card>
         <CardSection title="Напоминалки">
           <p className="text-[12px] mb-3" style={{ color: "var(--ink-muted)" }}>
-            Просто заметки для себя — переключение тумблера ничего не делает в коде, это не функциональная настройка. Видно только владельцу бота.
+            Личный чек-лист, не настройка бота — отметка здесь ничего не переключает в коде.
           </p>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[13px] max-w-[75%]">
+          {/* Plain checkbox, not the <Toggle> switch used for real settings elsewhere —
+              deliberately different affordance so a checked item here never reads as a
+              live feature toggle. See the CardSection copy above. */}
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={reminders?.["daily-summary-encryption"] ?? false}
+              onChange={(e) => toggleReminder("daily-summary-encryption", e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded-[3px]"
+              style={{ accentColor: "var(--accent)" }}
+            />
+            <span className="text-[13px]" style={{ color: "var(--ink)" }}>
               Добавить шифрование at rest для буфера ежедневной ИИ-сводки, если срок хранения (сейчас 48ч) когда-нибудь увеличится
             </span>
-            <Toggle
-              checked={reminders?.["daily-summary-encryption"] ?? false}
-              onChange={(v) => toggleReminder("daily-summary-encryption", v)}
-            />
-          </div>
+          </label>
         </CardSection>
       </Card>
     </div>

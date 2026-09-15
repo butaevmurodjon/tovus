@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface TelegramWebAppUser {
   id: number;
@@ -10,9 +10,17 @@ export interface TelegramWebAppUser {
   language_code?: string;
 }
 
+interface TelegramBackButton {
+  isVisible: boolean;
+  show: () => TelegramBackButton;
+  hide: () => TelegramBackButton;
+  onClick: (cb: () => void) => TelegramBackButton;
+  offClick: (cb: () => void) => TelegramBackButton;
+}
+
 interface TelegramWebApp {
   initData: string;
-  initDataUnsafe: { user?: TelegramWebAppUser };
+  initDataUnsafe: { user?: TelegramWebAppUser; start_param?: string };
   ready: () => void;
   expand: () => void;
   setHeaderColor: (color: string) => void;
@@ -25,6 +33,9 @@ interface TelegramWebApp {
     impactOccurred: (style: "light" | "medium" | "heavy" | "rigid" | "soft") => void;
     notificationOccurred: (type: "error" | "success" | "warning") => void;
   };
+  /** Bot API 6.1+. Absent (not just unsupported) on very old clients — every
+   * call site must optional-chain. */
+  BackButton?: TelegramBackButton;
 }
 
 declare global {
@@ -37,6 +48,7 @@ export function useTelegramWebApp() {
   const [initData, setInitData] = useState<string | null>(null);
   const [inTelegram, setInTelegram] = useState(false);
   const [bootstrapped, setBootstrapped] = useState(false);
+  const [startParam, setStartParam] = useState<string | null>(null);
 
   useEffect(() => {
     const wa = window.Telegram?.WebApp;
@@ -55,11 +67,75 @@ export function useTelegramWebApp() {
       // older client versions may not support these calls
     }
     setInitData(wa.initData || null);
+    // `?startapp=g-1001234567890` from /panel's deep link (miniAppButtonUrl
+    // in commands.ts) — was read nowhere, so that link always landed on the
+    // plain group list instead of the group it was for (FAANG-audit finding).
+    setStartParam(wa.initDataUnsafe?.start_param || null);
     setInTelegram(true);
     setBootstrapped(true);
   }, []);
 
-  return { initData, inTelegram, bootstrapped };
+  return { initData, inTelegram, bootstrapped, startParam };
+}
+
+/**
+ * Wires Telegram's native BackButton (top-left chevron in the client's own
+ * chrome, not our in-page TopBar arrow) to `onBack`. Pass `null` to hide it
+ * on screens with nowhere to go back to (the dashboard root).
+ *
+ * Why this exists at all: without it, Android's system back gesture closes
+ * the whole Mini App instead of going up one level — harmless while the app
+ * was a single flat screen per section, but a real trap once any screen has
+ * a level below it (subscreens, resolved-entity views, etc).
+ *
+ * `offClick` in the cleanup is not optional — Telegram's BackButton keeps
+ * every registered handler until explicitly removed, so skipping it would
+ * stack a handler per navigation and fire all of them (all prior `onBack`s
+ * plus the current one) on the next single tap.
+ */
+export function useTelegramBackButton(onBack: (() => void) | null) {
+  const onBackRef = useRef(onBack);
+  // Ref writes must happen outside render (React's own rule) — this effect
+  // has no deps array so it runs after every commit, keeping the ref fresh
+  // without re-registering the BackButton handler itself (that one only
+  // re-runs on Boolean(onBack) flipping, see below).
+  useEffect(() => {
+    onBackRef.current = onBack;
+  });
+
+  useEffect(() => {
+    const bb = window.Telegram?.WebApp?.BackButton;
+    if (!bb) return;
+    if (!onBackRef.current) {
+      try {
+        bb.hide();
+      } catch {
+        // absent-but-throws client, same class of bug as showConfirm below
+      }
+      return;
+    }
+    const handler = () => onBackRef.current?.();
+    try {
+      bb.onClick(handler);
+      bb.show();
+    } catch {
+      // method present but throws on some client versions — nothing to clean
+      // up in that case, the button never actually registered
+      return;
+    }
+    return () => {
+      try {
+        bb.offClick(handler);
+        bb.hide();
+      } catch {
+        // best-effort cleanup only
+      }
+    };
+    // Re-run only when going from "no target" to "has a target" or vice versa
+    // — the ref keeps the closure fresh for a changed *same-shape* handler
+    // without tearing down and re-registering on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(onBack)]);
 }
 
 export function haptic(style: "light" | "medium" | "heavy" = "light") {

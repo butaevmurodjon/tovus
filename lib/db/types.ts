@@ -42,7 +42,7 @@ export interface GroupSettings {
   logChannelId: number | null;
   lang: Lang;
   createdAt: number;
-  /** Off by default — tucked into an "Advanced" section in the Mini App, not the main flow. */
+  /** Off by default — surfaced in the Mini App's "Вход и новые участники" card. */
   captchaEnabled: boolean;
   /** "button" (one-tap) / "math" (pick the correct sum) are Pro-gated like the
    * rest of captchaEnabled; "rules" (agree-to-rules gate, §15.3) is deliberately
@@ -446,4 +446,8 @@ export interface OwnerGroupSummary {
   violationsToday: number;
   joinsToday: number;
   createdAt: number;
+  /** For the owner dashboard's inline toggle (FAANG-audit PR-3) — no extra
+   * Redis read to get this, `getGroupSettings` is already called per group
+   * to build this summary. */
+  dailySummaryOwnerAllowed: boolean;
 }

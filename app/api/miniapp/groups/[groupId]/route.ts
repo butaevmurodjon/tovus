@@ -6,6 +6,8 @@ import { getGroupSettings, getWhitelist, updateGroupSettings } from "@/lib/db/gr
 import { getBotPermissions, isBotAdminOfChat, missingPermissionsFor } from "@/lib/telegram/adminCheck";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { getStats } from "@/lib/db/stats";
+import { getCustomWords } from "@/lib/db/customWords";
+import { getAllowlist } from "@/lib/db/allowlist";
 import { canUseProFeature } from "@/lib/billing/plan";
 import { supportUrl } from "@/lib/telegram/support";
 import type { GroupSettings } from "@/lib/db/types";
@@ -31,11 +33,17 @@ export async function GET(
   // whitelist/today's-stats are for the §6.5 priority-5 overview card — cheap
   // enough (one smembers, one hgetall) to fetch unconditionally alongside the
   // rest rather than adding a second round trip just for that card.
-  const [botPermissions, memberCount, whitelist, todayStats] = await Promise.all([
+  // customWords/allowlist counts are for the settings index's "Списки и
+  // слова" status subtitle (PR-1) — same cheap-enough-to-always-fetch logic
+  // as whitelist above; both lists are capped (200 words / 100 entries, see
+  // the add-routes) so this never grows unbounded.
+  const [botPermissions, memberCount, whitelist, todayStats, customWords, allowlist] = await Promise.all([
     getBotPermissions(getApi(), chatId),
     getCachedMemberCount(getApi(), chatId),
     getWhitelist(chatId),
     getStats(chatId, "today"),
+    getCustomWords(chatId),
+    getAllowlist(chatId),
   ]);
   const permCtx = {
     action: settings.action,
@@ -54,11 +62,19 @@ export async function GET(
     // settings page shows a lock on).
     federationEligible: canUseProFeature(settings, memberCount),
     whitelistCount: whitelist.length,
+    customWordsCount: customWords.length,
+    allowlistCount: allowlist.length,
     violationsToday: todayStats.total,
     // Null when TELEGRAM_BOT_USERNAME isn't provisioned — the page must then
     // simply omit the "Написать в поддержку" button, same convention as
     // addToGroupUrl()/appealUrl() elsewhere.
     supportUrl: supportUrl(chatId),
+    // Both toggles below are real no-ops without their env var (silent
+    // early-return in the code that would otherwise act on them) — surfaced
+    // here so the settings page can disable+explain instead of showing a
+    // "these do something" state that never fires.
+    ocrConfigured: Boolean(process.env.OCR_API_KEY),
+    digestHubConfigured: Boolean(process.env.DIGEST_HUB_CHAT_ID),
   });
 }
 
@@ -92,6 +108,25 @@ export async function PATCH(
   // itself this, only /api/miniapp/owner/groups/[groupId]/dailysummary can.
   if ("dailySummaryOwnerAllowed" in patch) delete patch.dailySummaryOwnerAllowed;
   if ("lastDailySummarySentDate" in patch) delete patch.lastDailySummarySentDate;
+
+  // Owner-only / server-managed fields. Without this an admin PATCH could
+  // self-grant PRO (`plan`/`planExpiresAt` — see /owner/groups/[id]/pro for
+  // the only legitimate writer), forge referral attribution, or rewrite
+  // bookkeeping (`lastDigestSentMonth`, `createdAt`, `chatId`) the group has
+  // no business touching. `title` is synced from Telegram itself on every
+  // my_chat_member event (registerGroup) — never client-writable.
+  const ownerOnlyFields = [
+    "plan",
+    "planExpiresAt",
+    "referredBy",
+    "lastDigestSentMonth",
+    "createdAt",
+    "chatId",
+    "title",
+  ] as const;
+  for (const key of ownerOnlyFields) {
+    if (key in patch) delete patch[key];
+  }
 
   let channelGateError: string | null = null;
   if ("ownerChannelId" in patch) delete patch.ownerChannelId;

@@ -19,12 +19,22 @@ export function BottomNav({ chatId }: { chatId: number }) {
   const pathname = usePathname();
   const { t, isOwner } = useApp();
 
+  const settingsHref = `/app/group/${chatId}`;
   const items = [
-    { href: `/app/group/${chatId}`, label: t("miniapp.settingsTab"), icon: "⚙" },
-    { href: `/app/group/${chatId}/stats`, label: t("miniapp.statsTab"), icon: "▤" },
-    { href: `/app/group/${chatId}/journal`, label: t("miniapp.journalTab"), icon: "☰" },
-    ...(isOwner ? [{ href: `/app/group/${chatId}/owner`, label: "Управление", icon: "🛡" }] : []),
+    { href: settingsHref, label: t("miniapp.settingsTab"), icon: "⚙" },
+    { href: `${settingsHref}/stats`, label: t("miniapp.statsTab"), icon: "▤" },
+    { href: `${settingsHref}/journal`, label: t("miniapp.journalTab"), icon: "☰" },
+    ...(isOwner ? [{ href: `${settingsHref}/owner`, label: t("miniapp.groupOwnerTab"), icon: "🛡" }] : []),
   ];
+
+  // Longest-matching-href wins, not exact match — otherwise a page with no
+  // exact tab (e.g. /app/group/[id]/broadcast, reached from the Settings
+  // tab's federation card) highlighted nothing, and settingsHref being a
+  // prefix of every other tab's href would otherwise make Settings "active"
+  // everywhere if a naive startsWith ran in list order instead.
+  const activeHref = [...items].sort((a, b) => b.href.length - a.href.length).find((item) =>
+    pathname === item.href || pathname?.startsWith(`${item.href}/`)
+  )?.href;
 
   return (
     <nav
@@ -37,7 +47,7 @@ export function BottomNav({ chatId }: { chatId: number }) {
       }}
     >
       {items.map((item) => {
-        const active = pathname === item.href;
+        const active = item.href === activeHref;
         return (
           <Link
             key={item.href}

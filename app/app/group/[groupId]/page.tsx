@@ -11,8 +11,10 @@ import { Button } from "@/components/Button";
 import { Badge } from "@/components/Badge";
 import { StatTile } from "@/components/StatTile";
 import { PermissionWarning } from "@/components/PermissionWarning";
-import { Collapsible } from "@/components/Collapsible";
+import { SettingsLink } from "@/components/SettingsLink";
+import { Row, ProFeatureHint } from "@/components/SettingsPrimitives";
 import { JoinRequestsCard } from "./JoinRequestsCard";
+import { useToast, Toast } from "@/lib/miniapp/useToast";
 import { haptic, hapticNotify, openInvoice, openTelegramLink } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
 import { isProActive, formatPlanDate, FREE_TIER_MAX_MEMBERS } from "@/lib/billing/plan";
@@ -23,56 +25,34 @@ import {
   type StrictnessLevel,
 } from "@/lib/moderation/strictnessPresets";
 import type { GroupSettings } from "@/lib/db/types";
-import { ALL_STRICT_CONTENT_RULES, type StrictContentRule } from "@/lib/moderation/strictContentRules";
 
-const STRICT_CONTENT_RULE_OPTIONS: { value: StrictContentRule; labelKey: string }[] = ALL_STRICT_CONTENT_RULES.map(
-  (value) => ({ value, labelKey: `miniapp.strictContentRule_${value}` })
-);
-
-const WARN_LIMIT_PRESETS = [3, 5, 10];
-
-const VOTE_BAN_THRESHOLD_PRESETS = [3, 5, 10];
-
-const RESTRICT_MINUTES_PRESETS = [5, 10, 30, 60];
-
-const CAPTCHA_TIMEOUT_PRESETS = [60, 120, 300];
-
-const MIN_ACCOUNT_AGE_PRESETS = [0, 1, 3, 7, 30];
-
-const PRO_GRANT_DAYS = [30, 90, 365];
-
-/** Module scope (not the component body) so the current-time read here isn't
- * flagged as an impure render call — this only ever runs from a click handler. */
-function extendExpiry(currentExpiresAt: number | null, active: boolean, days: number): number {
-  const base = active && currentExpiresAt ? currentExpiresAt : Date.now();
-  return base + days * 24 * 60 * 60 * 1000;
-}
-
+/**
+ * Settings INDEX (FAANG-audit PR-1) — the old single ~44-control page split
+ * into this index + 5 subscreens under settings/*. Material's own guidance
+ * for 15+ settings: group under subscreens, and each index row's status
+ * text must show current VALUE, not a description (see the status*()
+ * helpers below and SettingsLink's doc comment). What stays here: the
+ * overview, the one-tap strictness preset (covers ~80% of cases), plan/PRO,
+ * the join-requests inbox (a self-hiding action, not a setting), federation
+ * (a cross-group feature, not this group's own setting) and the
+ * pre-PRO attribution toggle.
+ */
 export default function GroupSettingsPage() {
-  const { t, fetcher, lang, isOwner } = useApp();
+  const { t, fetcher, lang } = useApp();
   const {
     settings,
     missingPermissions,
     federationEligible,
     whitelistCount,
+    customWordsCount,
+    allowlistCount,
     violationsToday,
     supportUrl,
     updateSettings,
     chatId,
     refresh,
   } = useGroup();
-  const [toast, setToast] = useState<string | null>(null);
-  const [logChannelInput, setLogChannelInput] = useState(settings?.logChannelId?.toString() ?? "");
-  const [ownerChannelInput, setOwnerChannelInput] = useState(settings?.ownerChannelUsername ?? "");
-  const [savingOwnerChannel, setSavingOwnerChannel] = useState(false);
-  const [welcomeInput, setWelcomeInput] = useState(settings?.welcomeMessage ?? "");
-  const [rulesTextInput, setRulesTextInput] = useState(settings?.rulesText ?? "");
-  const [savingLogChannel, setSavingLogChannel] = useState(false);
-  const [savingWelcome, setSavingWelcome] = useState(false);
-  const [savingRulesText, setSavingRulesText] = useState(false);
-  const [nightStartInput, setNightStartInput] = useState(String(settings?.nightModeStartHour ?? 23));
-  const [nightEndInput, setNightEndInput] = useState(String(settings?.nightModeEndHour ?? 7));
-  const [savingNightHours, setSavingNightHours] = useState(false);
+  const { toast, flash } = useToast();
   const [upgrading, setUpgrading] = useState(false);
   // §3 audit: pollForProActivation below is a setTimeout chain that used to run
   // unconditionally to completion — `cancelled` stops it from calling `refresh()`
@@ -92,128 +72,13 @@ export default function GroupSettingsPage() {
 
   if (!settings) return null;
 
-  function flash(message: string) {
-    setToast(message);
-    setTimeout(() => setToast((cur) => (cur === message ? null : cur)), 1600);
-  }
-
-  // Updates apply to the UI immediately (see GroupProvider.updateSettings) — no
-  // blocking spinner needed here, just haptic feedback and an error toast if the
-  // background request ends up failing. Shared by every single-field setting
-  // below (toggles, the action picker, warn escalation) — they all differ only
-  // in which key/value they send.
-  async function setField<K extends keyof GroupSettings>(key: K, value: GroupSettings[K]) {
+  // Only federationEnabled is still server-gated (`gateKeys` in the PATCH
+  // route) — captcha/antiraid went free in the Phase 1 re-cut.
+  async function toggleFederation(value: boolean) {
     haptic("light");
     try {
-      await updateSettings({ [key]: value } as never);
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    }
-  }
-
-  async function saveOwnerChannel() {
-    const trimmed = ownerChannelInput.trim();
-    setSavingOwnerChannel(true);
-    try {
-      const rejected = await updateSettings({ ownerChannelUsername: trimmed === "" ? null : trimmed } as never);
-      if (rejected.includes("ownerChannelUsername")) {
-        hapticNotify("error");
-        flash(t("miniapp.ownerChannelNotAdmin"));
-      } else {
-        flash(t("miniapp.savedToast"));
-      }
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    } finally {
-      setSavingOwnerChannel(false);
-    }
-  }
-
-  async function saveLogChannel() {
-    const trimmed = logChannelInput.trim();
-    const logChannelId = trimmed === "" ? null : Number(trimmed);
-    if (logChannelId !== null && !Number.isFinite(logChannelId)) return;
-    setSavingLogChannel(true);
-    try {
-      const rejected = await updateSettings({ logChannelId });
-      if (rejected.includes("logChannelId")) {
-        hapticNotify("error");
-        flash(t("miniapp.logChannelNotAdmin"));
-      } else {
-        flash(t("miniapp.savedToast"));
-      }
-    } catch (err) {
-      if (err instanceof ApiError && err.message === "log channel not admin") {
-        hapticNotify("error");
-        flash(t("miniapp.logChannelNotAdmin"));
-      } else {
-        hapticNotify("error");
-        flash(t("miniapp.errorToast"));
-      }
-    } finally {
-      setSavingLogChannel(false);
-    }
-  }
-
-  async function saveNightHours() {
-    const [startRaw, endRaw] = [nightStartInput.trim(), nightEndInput.trim()];
-    const [start, end] = [Number(startRaw), Number(endRaw)];
-    const isHour = (raw: string, h: number) => raw !== "" && Number.isInteger(h) && h >= 0 && h <= 23;
-    if (!isHour(startRaw, start) || !isHour(endRaw, end)) return;
-    setSavingNightHours(true);
-    try {
-      await updateSettings({ nightModeStartHour: start, nightModeEndHour: end });
-      flash(t("miniapp.savedToast"));
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    } finally {
-      setSavingNightHours(false);
-    }
-  }
-
-  async function saveWelcome() {
-    const trimmed = welcomeInput.trim();
-    setSavingWelcome(true);
-    try {
-      await updateSettings({
-        welcomeMessage: trimmed === "" ? null : trimmed,
-        welcomeEnabled: trimmed !== "",
-      });
-      flash(t("miniapp.savedToast"));
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    } finally {
-      setSavingWelcome(false);
-    }
-  }
-
-  async function saveRulesText() {
-    const trimmed = rulesTextInput.trim();
-    setSavingRulesText(true);
-    try {
-      await updateSettings({ rulesText: trimmed === "" ? null : trimmed });
-      flash(t("miniapp.savedToast"));
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    } finally {
-      setSavingRulesText(false);
-    }
-  }
-
-  async function toggleProFeature(key: "captchaEnabled" | "antiraidEnabled" | "federationEnabled", value: boolean) {
-    haptic("light");
-    try {
-      // The server strips any ineligible gated key from the patch and echoes it
-      // back in `rejected` with a 200 (not a 402) — surfaced as the "locked"
-      // toast below. Same handling holds inside a future multi-field patch,
-      // where the accepted fields still apply.
-      const rejected = await updateSettings({ [key]: value } as never);
-      if (rejected.includes(key)) {
+      const rejected = await updateSettings({ federationEnabled: value } as never);
+      if (rejected.includes("federationEnabled")) {
         hapticNotify("error");
         flash(t("miniapp.proLockedHint", { limit: FREE_TIER_MAX_MEMBERS }));
       }
@@ -228,12 +93,17 @@ export default function GroupSettingsPage() {
     }
   }
 
+  async function setAttributionEnabled(value: boolean) {
+    haptic("light");
+    try {
+      await updateSettings({ attributionEnabled: value });
+    } catch {
+      hapticNotify("error");
+      flash(t("miniapp.errorToast"));
+    }
+  }
+
   // §6.5 priority 5: one tap sets the whole bundle in strictnessPresets.ts.
-  // Every field a preset touches is deliberately free/ungated (see that
-  // file's comment), but `rejected` is still checked rather than assumed
-  // empty — the field list can grow, and updateSettings resolving with a
-  // partial rejection (not throwing) is exactly how a silently-dropped field
-  // would slip through otherwise, same as toggleProFeature above.
   async function applyStrictness(level: StrictnessLevel) {
     haptic("medium");
     try {
@@ -250,39 +120,7 @@ export default function GroupSettingsPage() {
     }
   }
 
-  // Owner-only manual PRO override — bypasses payment entirely, unlike
-  // toggleProFeature above which only flips already-purchased entitlements.
-  async function grantPro(days: number) {
-    if (!settings) return;
-    haptic("medium");
-    const planExpiresAt = extendExpiry(settings.planExpiresAt, isProActive(settings), days);
-    try {
-      await updateSettings({ plan: "pro", planExpiresAt });
-      hapticNotify("success");
-      flash(t("miniapp.savedToast"));
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    }
-  }
-
-  async function revokePro() {
-    haptic("medium");
-    try {
-      await updateSettings({ plan: "free", planExpiresAt: null });
-      hapticNotify("success");
-      flash(t("miniapp.savedToast"));
-    } catch {
-      hapticNotify("error");
-      flash(t("miniapp.errorToast"));
-    }
-  }
-
   async function handleUpgrade() {
-    // setUpgrading(false) below (in `finally`) fires as soon as openInvoice is
-    // called, well before payment completes — `active` is what actually covers
-    // the whole poll-until-confirmed window, so this is the guard that stops a
-    // second click from starting a second overlapping invoice+poll cycle.
     if (upgradePollRef.current.active) return;
     haptic("light");
     setUpgrading(true);
@@ -291,10 +129,6 @@ export default function GroupSettingsPage() {
       openInvoice(link, (status) => {
         if (status === "paid") {
           hapticNotify("success");
-          // The webhook that actually flips `plan`/`planExpiresAt` in storage races
-          // this callback — a single fixed-delay refresh can land before it commits
-          // and show the group as still on the free plan. Poll with backoff instead
-          // of guessing one delay that works for every payment.
           upgradePollRef.current.active = true;
           pollForProActivation();
         }
@@ -314,17 +148,10 @@ export default function GroupSettingsPage() {
       return;
     }
     setTimeout(async () => {
-      // The page may have unmounted (navigated away) since this was scheduled —
-      // `refresh()` targets GroupProvider context state, which can outlive this
-      // page, so without this check a stale poll would keep calling it after
-      // the user left, and/or reschedule itself forever.
       if (upgradePollRef.current.cancelled) return;
-      // Check freshly-fetched settings directly rather than the `settings` closed
-      // over at call time — `refresh()` only schedules a state update, so reading
-      // context state right after calling it would still see the stale value.
       try {
         const data = await fetcher<{ settings: GroupSettings }>(`/api/miniapp/groups/${chatId}`);
-        if (upgradePollRef.current.cancelled) return; // unmounted while the fetch was in flight
+        if (upgradePollRef.current.cancelled) return;
         if (isProActive(data.settings)) {
           refresh();
           upgradePollRef.current.active = false;
@@ -337,54 +164,57 @@ export default function GroupSettingsPage() {
     }, delays[attempt]);
   }
 
-  // The bot's /warnlimit command accepts any value 0-20, but the Mini App only
-  // offers the three common presets — if the group's current limit was set via
-  // the bot to something else (e.g. 7), show it as a fourth, selected option
-  // instead of leaving the control blank and silently overwriting it on the
-  // next unrelated tap.
-  const warnLimitOptions = WARN_LIMIT_PRESETS.includes(settings.warnLimit)
-    ? WARN_LIMIT_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
-    : [...WARN_LIMIT_PRESETS, settings.warnLimit].map((n) => ({ value: String(n), label: String(n) }));
-
-  const voteBanThresholdOptions = VOTE_BAN_THRESHOLD_PRESETS.includes(settings.voteBanThreshold)
-    ? VOTE_BAN_THRESHOLD_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
-    : [...VOTE_BAN_THRESHOLD_PRESETS, settings.voteBanThreshold].map((n) => ({ value: String(n), label: String(n) }));
-
-  const restrictMinutesOptions = RESTRICT_MINUTES_PRESETS.includes(settings.restrictNewMembersMinutes)
-    ? RESTRICT_MINUTES_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
-    : [...RESTRICT_MINUTES_PRESETS, settings.restrictNewMembersMinutes].map((n) => ({
-        value: String(n),
-        label: String(n),
-      }));
-
-  const minAccountAgeOptions = MIN_ACCOUNT_AGE_PRESETS.map((n) => ({
-    value: String(n),
-    label: n === 0 ? t("common.off") : String(n),
-  }));
-
-  const captchaTimeoutOptions = CAPTCHA_TIMEOUT_PRESETS.includes(settings.captchaTimeoutSeconds)
-    ? CAPTCHA_TIMEOUT_PRESETS.map((n) => ({ value: String(n), label: String(n) }))
-    : [...CAPTCHA_TIMEOUT_PRESETS, settings.captchaTimeoutSeconds].map((n) => ({
-        value: String(n),
-        label: String(n),
-      }));
-
   // Overview status card (§6.5 priority 5): "protection" is the base
   // content-filtering layer (profanity/spam) — deliberately not tied to
   // casCheck/premium/captcha, which are opt-in refinements on top of it.
   const protectionOn = settings.profanityFilter || settings.antispam;
   const currentStrictness = detectStrictnessLevel(settings);
 
+  // Status subtitles for the 5 subscreen links — real current values, not
+  // descriptions (Material's settings guidance: the secondary line under a
+  // settings entry shows state). Deliberately terse (2-3 short facts max).
+  const contentParts = [
+    settings.profanityFilter && t("miniapp.statusWordProfanity"),
+    settings.antispam && t("miniapp.statusWordAntispam"),
+    settings.casCheckEnabled && t("miniapp.statusWordCas"),
+  ].filter(Boolean) as string[];
+  const contentStatus = contentParts.length > 0 ? contentParts.join(" · ") : t("common.off");
+
+  const antiraidEffective = settings.antiraidEnabled || settings.antiraidAuto;
+  const entryStatus = [
+    `${t("miniapp.statusWordCaptcha")} ${settings.captchaEnabled ? t("common.on") : t("common.off")}`,
+    `${t("miniapp.statusWordAntiraid")} ${antiraidEffective ? t("common.on") : t("common.off")}`,
+  ].join(" · ");
+
+  const actionLabelKey = { delete: "actionDelete", warn: "actionWarn", mute: "actionMute", ban: "actionBan" }[
+    settings.action
+  ];
+  const punishmentsStatus = [
+    t(`miniapp.${actionLabelKey}`),
+    settings.warnEscalationEnabled && t("miniapp.statusWarnLimit", { limit: settings.warnLimit }),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const notificationsParts = [
+    settings.nightModeEnabled &&
+      t("miniapp.statusNightMode", {
+        start: settings.nightModeStartHour,
+        end: settings.nightModeEndHour,
+      }),
+    settings.logChannelId && t("miniapp.statusLogChannelOn"),
+  ].filter(Boolean) as string[];
+  const notificationsStatus = notificationsParts.length > 0 ? notificationsParts.join(" · ") : t("common.off");
+
+  const listsStatus = t("miniapp.statusListsSummary", {
+    whitelist: whitelistCount,
+    words: customWordsCount,
+    allow: allowlistCount,
+  });
+
   return (
     <div className="px-4 py-4 flex flex-col gap-3">
-      {toast && (
-        <div
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-20 max-w-[calc(100%-2rem)] rounded-full px-3.5 py-1.5 text-center text-[12px] font-medium"
-          style={{ background: "var(--ink)", color: "#fff" }}
-        >
-          {toast}
-        </div>
-      )}
+      <Toast message={toast} />
 
       <Card>
         <CardSection title={t("miniapp.overviewTitle")}>
@@ -406,6 +236,26 @@ export default function GroupSettingsPage() {
       </Card>
 
       <PermissionWarning missing={missingPermissions} action={settings.action} t={t} />
+
+      <Card>
+        <CardSection title={t("miniapp.strictnessTitle")} subtitle={t("miniapp.strictnessHint")}>
+          <SegmentedControl
+            value={currentStrictness}
+            onChange={applyStrictness}
+            columns={STRICTNESS_LEVELS.length}
+            options={[
+              { value: "mild", label: t("miniapp.strictnessMild") },
+              { value: "balanced", label: t("miniapp.strictnessBalanced") },
+              { value: "strict", label: t("miniapp.strictnessStrict") },
+            ]}
+          />
+          {currentStrictness === null && (
+            <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.strictnessCustomHint")}
+            </p>
+          )}
+        </CardSection>
+      </Card>
 
       <Card>
         <CardSection title={t("miniapp.planTitle")}>
@@ -431,583 +281,89 @@ export default function GroupSettingsPage() {
         </CardSection>
       </Card>
 
-      {isOwner && (
+      <div className="flex flex-col gap-2">
+        <SettingsLink
+          href={`/app/group/${chatId}/settings/content`}
+          icon="🛡"
+          title={t("miniapp.sectionProtection")}
+          status={contentStatus}
+        />
+        <SettingsLink
+          href={`/app/group/${chatId}/settings/entry`}
+          icon="🚪"
+          title={t("miniapp.sectionEntry")}
+          status={entryStatus}
+        />
+        <SettingsLink
+          href={`/app/group/${chatId}/settings/punishments`}
+          icon="⚖️"
+          title={t("miniapp.sectionPunishments")}
+          status={punishmentsStatus}
+        />
+        <SettingsLink
+          href={`/app/group/${chatId}/settings/notifications`}
+          icon="🔔"
+          title={t("miniapp.sectionChatNotifications")}
+          status={notificationsStatus}
+        />
+        <SettingsLink
+          href={`/app/group/${chatId}/settings/lists`}
+          icon="📋"
+          title={t("miniapp.sectionLists")}
+          status={listsStatus}
+        />
+      </div>
+
+      <JoinRequestsCard chatId={chatId} />
+
+      {/* Федерация: отдельная тема (общий бан-лист МЕЖДУ группами), не про
+          эту группу саму по себе — своя карточка, а не строчка в свалке. */}
+      <Card>
+        <CardSection>
+          <Row
+            label={
+              <span className="flex items-center gap-1.5">
+                {t("miniapp.federationTitle")}
+                {!federationEligible && <Badge variant="warning">PRO</Badge>}
+              </span>
+            }
+          >
+            <Toggle checked={settings.federationEnabled} onChange={toggleFederation} />
+          </Row>
+          <ProFeatureHint
+            eligible={federationEligible}
+            enabled={settings.federationEnabled}
+            normalHint={t("miniapp.federationHint")}
+            t={t}
+          />
+          {settings.federationEnabled && (
+            <Link
+              href={`/app/group/${chatId}/broadcast`}
+              className="mt-3 block text-center rounded-[var(--radius-sm)] px-4 py-2.5 text-[14px] font-medium"
+              style={{ background: "#f2f1ee", color: "var(--ink)" }}
+            >
+              {t("miniapp.groupBroadcastLink")}
+            </Link>
+          )}
+        </CardSection>
+      </Card>
+
+      {/* Only meaningful pre-PRO (the attribution button never shows once
+          PRO is active — see notifyChat) — hidden outright for PRO groups
+          rather than rendering an empty titled card. */}
+      {!isProActive(settings) && (
         <Card>
-          <CardSection title={t("miniapp.ownerProControlTitle")} subtitle={t("miniapp.ownerProControlHint")}>
-            <div className="flex flex-wrap gap-2">
-              {PRO_GRANT_DAYS.map((days) => (
-                <Button key={days} variant="secondary" onClick={() => grantPro(days)}>
-                  {t("miniapp.ownerGrantProDays", { days })}
-                </Button>
-              ))}
-              {isProActive(settings) && (
-                <Button variant="danger" onClick={revokePro}>
-                  {t("miniapp.ownerRevokePro")}
-                </Button>
-              )}
-            </div>
+          <CardSection>
+            <Row label={t("miniapp.attributionTitle")}>
+              <Toggle checked={settings.attributionEnabled} onChange={setAttributionEnabled} />
+            </Row>
+            <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
+              {t("miniapp.attributionHint")}
+            </p>
           </CardSection>
         </Card>
       )}
 
-      <Card>
-        <CardSection title={t("miniapp.strictnessTitle")} subtitle={t("miniapp.strictnessHint")}>
-          <SegmentedControl
-            value={currentStrictness}
-            onChange={applyStrictness}
-            columns={STRICTNESS_LEVELS.length}
-            options={[
-              { value: "mild", label: t("miniapp.strictnessMild") },
-              { value: "balanced", label: t("miniapp.strictnessBalanced") },
-              { value: "strict", label: t("miniapp.strictnessStrict") },
-            ]}
-          />
-          {currentStrictness === null && (
-            <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.strictnessCustomHint")}
-            </p>
-          )}
-        </CardSection>
-      </Card>
-
-      <Card>
-        <CardSection title={t("miniapp.sectionProtection")}>
-          <Row label={t("miniapp.filterProfanity")}>
-            <Toggle checked={settings.profanityFilter} onChange={(v) => setField("profanityFilter", v)} />
-          </Row>
-          <Divider />
-          <Row label={t("miniapp.antispam")}>
-            <Toggle checked={settings.antispam} onChange={(v) => setField("antispam", v)} />
-          </Row>
-          <Divider />
-          <Row label={t("miniapp.casCheckTitle")}>
-            <Toggle checked={settings.casCheckEnabled} onChange={(v) => setField("casCheckEnabled", v)} />
-          </Row>
-          <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.casCheckHint")}
-          </p>
-          <Divider />
-          <Row label={t("miniapp.premiumMode")}>
-            <Toggle checked={settings.premium} onChange={(v) => setField("premium", v)} />
-          </Row>
-          <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.premiumHint")}
-          </p>
-          <Divider />
-          <Row label={t("miniapp.nightModeTitle")}>
-            <Toggle checked={settings.nightModeEnabled} onChange={(v) => setField("nightModeEnabled", v)} />
-          </Row>
-          <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.nightModeHint")}
-          </p>
-          {settings.nightModeEnabled && (
-            <div className="mb-2">
-              <div className="flex gap-2 items-end">
-                <div className="flex-1 min-w-0">
-                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                    {t("miniapp.nightModeStartLabel")}
-                  </p>
-                  <input
-                    type="number"
-                    min={0}
-                    max={23}
-                    value={nightStartInput}
-                    onChange={(e) => setNightStartInput(e.target.value)}
-                    // w-full, not flex-1: the wrapper is a plain block div (it
-                    // holds the label above), so `flex-1` was inert here and
-                    // the input kept its intrinsic ~170px width. Two of those
-                    // plus the Save button overflowed the card horizontally on
-                    // any phone narrower than ~430px.
-                    className="w-full min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
-                    style={{ borderColor: "var(--border-strong)" }}
-                  />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                    {t("miniapp.nightModeEndLabel")}
-                  </p>
-                  <input
-                    type="number"
-                    min={0}
-                    max={23}
-                    value={nightEndInput}
-                    onChange={(e) => setNightEndInput(e.target.value)}
-                    className="w-full min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
-                    style={{ borderColor: "var(--border-strong)" }}
-                  />
-                </div>
-                <Button
-                  variant="primary"
-                  onClick={saveNightHours}
-                  disabled={savingNightHours}
-                  className="shrink-0"
-                >
-                  {t("common.save")}
-                </Button>
-              </div>
-              <p className="text-[12px] mt-1.5" style={{ color: "var(--ink-muted)" }}>
-                {t("miniapp.nightModeUtcHint")}
-              </p>
-            </div>
-          )}
-          <Divider />
-          <Row label={t("miniapp.deleteServiceMessagesTitle")}>
-            <Toggle
-              checked={settings.deleteServiceMessages}
-              onChange={(v) => setField("deleteServiceMessages", v)}
-            />
-          </Row>
-          <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.deleteServiceMessagesHint")}
-          </p>
-          <Divider />
-          <Row label={t("miniapp.deleteNoticeTitle")}>
-            <Toggle checked={settings.deleteNotice} onChange={(v) => setField("deleteNotice", v)} />
-          </Row>
-          <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.deleteNoticeHint")}
-          </p>
-          <Divider />
-          <Row label={t("miniapp.monthlyDigestTitle")}>
-            <Toggle
-              checked={settings.monthlyDigestEnabled}
-              onChange={(v) => setField("monthlyDigestEnabled", v)}
-            />
-          </Row>
-          <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.monthlyDigestHint")}
-          </p>
-          {/* The attribution button is suppressed outright for active-Pro
-              groups (see notifyChat), so showing a toggle that changes nothing
-              there would just be misleading — hidden rather than disabled. */}
-          {!isProActive(settings) && (
-            <>
-              <Divider />
-              <Row label={t("miniapp.attributionTitle")}>
-                <Toggle
-                  checked={settings.attributionEnabled}
-                  onChange={(v) => setField("attributionEnabled", v)}
-                />
-              </Row>
-              <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
-                {t("miniapp.attributionHint")}
-              </p>
-            </>
-          )}
-        </CardSection>
-      </Card>
-
-      <JoinRequestsCard chatId={chatId} />
-
-      <Card>
-        <CardSection title={t("miniapp.sectionNewMembers")}>
-          <Row label={t("miniapp.restrictNewMembersTitle")}>
-            <Toggle
-              checked={settings.restrictNewMembersEnabled}
-              onChange={(v) => setField("restrictNewMembersEnabled", v)}
-            />
-          </Row>
-          <p className="text-[12px] mt-2 mb-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.restrictNewMembersHint")}
-          </p>
-          {settings.restrictNewMembersEnabled && (
-            <div>
-              <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                {t("miniapp.restrictNewMembersMinutesLabel")}
-              </p>
-              <SegmentedControl
-                value={String(settings.restrictNewMembersMinutes)}
-                onChange={(v) => setField("restrictNewMembersMinutes", Number(v))}
-                columns={restrictMinutesOptions.length}
-                options={restrictMinutesOptions}
-              />
-            </div>
-          )}
-
-          <Divider />
-          <Row label={t("miniapp.blockUnauthorizedBotsTitle")}>
-            <Toggle
-              checked={settings.blockUnauthorizedBots}
-              onChange={(v) => setField("blockUnauthorizedBots", v)}
-            />
-          </Row>
-          <p className="text-[12px] mt-2" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.blockUnauthorizedBotsHint")}
-          </p>
-        </CardSection>
-      </Card>
-
-      <Card>
-        <CardSection title={t("miniapp.sectionPunishments")}>
-          <SubLabel>{t("miniapp.violationAction")}</SubLabel>
-          <SegmentedControl
-            value={settings.action}
-            onChange={(action) => setField("action", action)}
-            columns={2}
-            options={[
-              { value: "delete", label: t("miniapp.actionDelete") },
-              { value: "warn", label: t("miniapp.actionWarn") },
-              { value: "mute", label: t("miniapp.actionMute") },
-              { value: "ban", label: t("miniapp.actionBan") },
-            ]}
-          />
-
-          <Divider />
-          <div className="mt-3">
-            <Row label={t("miniapp.warnEscalationTitle")}>
-              <Toggle
-                checked={settings.warnEscalationEnabled}
-                onChange={(v) => setField("warnEscalationEnabled", v)}
-              />
-            </Row>
-            <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.warnEscalationHint")}
-            </p>
-            {settings.warnEscalationEnabled && (
-              <>
-                <div className="mt-3">
-                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                    {t("miniapp.warnLimitLabel")}
-                  </p>
-                  <SegmentedControl
-                    value={String(settings.warnLimit)}
-                    onChange={(v) => setField("warnLimit", Number(v))}
-                    columns={WARN_LIMIT_PRESETS.includes(settings.warnLimit) ? 3 : 4}
-                    options={warnLimitOptions}
-                  />
-                </div>
-                <div className="mt-3">
-                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                    {t("miniapp.warnActionLabel")}
-                  </p>
-                  <SegmentedControl
-                    value={settings.warnAction}
-                    onChange={(action) => setField("warnAction", action)}
-                    columns={2}
-                    options={[
-                      { value: "mute", label: t("miniapp.actionMute") },
-                      { value: "ban", label: t("miniapp.actionBan") },
-                    ]}
-                  />
-                </div>
-              </>
-            )}
-          </div>
-
-          <Divider />
-          <div className="mt-3">
-            <SubLabel subtitle={t("miniapp.voteBanHint")}>{t("miniapp.voteBanTitle")}</SubLabel>
-            <SegmentedControl
-              value={String(settings.voteBanThreshold)}
-              onChange={(v) => setField("voteBanThreshold", Number(v))}
-              columns={voteBanThresholdOptions.length}
-              options={voteBanThresholdOptions}
-            />
-          </div>
-        </CardSection>
-      </Card>
-
-      <Card>
-        <CardSection title={t("miniapp.logChannelTitle")} subtitle={t("miniapp.logChannelHint")}>
-          <div className="flex gap-2">
-            <input
-              value={logChannelInput}
-              onChange={(e) => setLogChannelInput(e.target.value)}
-              placeholder={t("miniapp.logChannelPlaceholder")}
-              className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
-              style={{ borderColor: "var(--border-strong)" }}
-            />
-            <Button variant="primary" onClick={saveLogChannel} disabled={savingLogChannel} className="shrink-0">
-              {t("common.save")}
-            </Button>
-          </div>
-        </CardSection>
-      </Card>
-
-      <Card>
-        <CardSection title={t("miniapp.channelGateTitle")} subtitle={t("miniapp.channelGateHint")}>
-          <div className="flex gap-2 mb-3">
-            <input
-              value={ownerChannelInput}
-              onChange={(e) => setOwnerChannelInput(e.target.value)}
-              placeholder={t("miniapp.channelGatePlaceholder")}
-              className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
-              style={{ borderColor: "var(--border-strong)" }}
-            />
-            <Button variant="primary" onClick={saveOwnerChannel} disabled={savingOwnerChannel} className="shrink-0">
-              {t("common.save")}
-            </Button>
-          </div>
-          <Row label={t("miniapp.channelGateEnabledLabel")}>
-            <Toggle
-              checked={settings.ownerChannelGateEnabled}
-              onChange={(v) => setField("ownerChannelGateEnabled", v)}
-              disabled={!settings.ownerChannelId}
-            />
-          </Row>
-          <Divider />
-          <Row label={t("miniapp.helpProjectLabel")}>
-            <Toggle checked={settings.promoChannelOptIn} onChange={(v) => setField("promoChannelOptIn", v)} />
-          </Row>
-          <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
-            {t("miniapp.helpProjectHint")}
-          </p>
-        </CardSection>
-      </Card>
-
-      <Card>
-        <CardSection title={t("miniapp.welcomeTitle")} subtitle={t("miniapp.welcomeHint")}>
-          <div className="flex gap-2">
-            <input
-              value={welcomeInput}
-              onChange={(e) => setWelcomeInput(e.target.value)}
-              placeholder={t("miniapp.welcomePlaceholder")}
-              className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
-              style={{ borderColor: "var(--border-strong)" }}
-            />
-            <Button variant="primary" onClick={saveWelcome} disabled={savingWelcome} className="shrink-0">
-              {t("common.save")}
-            </Button>
-          </div>
-        </CardSection>
-      </Card>
-
-      <Card>
-        <CardSection>
-          <Collapsible title={t("miniapp.advancedSection")}>
-            <Row label={t("miniapp.captchaTitle")}>
-              <Toggle checked={settings.captchaEnabled} onChange={(v) => toggleProFeature("captchaEnabled", v)} />
-            </Row>
-            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.captchaHint")}
-            </p>
-            {settings.captchaEnabled && (
-              <>
-                <div className="mb-3">
-                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                    {t("miniapp.captchaTypeLabel")}
-                  </p>
-                  <SegmentedControl
-                    value={settings.captchaType}
-                    onChange={(v) => setField("captchaType", v)}
-                    columns={4}
-                    options={[
-                      { value: "button", label: t("miniapp.captchaTypeButton") },
-                      { value: "math", label: t("miniapp.captchaTypeMath") },
-                      { value: "rules", label: t("miniapp.captchaTypeRules") },
-                      { value: "message", label: t("miniapp.captchaTypeMessage") },
-                    ]}
-                  />
-                </div>
-                {settings.captchaType === "message" && (
-                  <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
-                    {t("miniapp.captchaTypeMessageHint")}
-                  </p>
-                )}
-                {settings.captchaType === "rules" && (
-                  <div className="mb-3">
-                    <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                      {t("miniapp.rulesTextLabel")}
-                    </p>
-                    <div className="flex gap-2">
-                      <input
-                        value={rulesTextInput}
-                        onChange={(e) => setRulesTextInput(e.target.value)}
-                        placeholder={t("miniapp.rulesTextPlaceholder")}
-                        className="flex-1 min-w-0 rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
-                        style={{ borderColor: "var(--border-strong)" }}
-                      />
-                      <Button variant="primary" onClick={saveRulesText} disabled={savingRulesText} className="shrink-0">
-                        {t("common.save")}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                <div className="mb-3">
-                  <p className="text-[12px] mb-1.5" style={{ color: "var(--ink-muted)" }}>
-                    {t("miniapp.captchaTimeoutLabel")}
-                  </p>
-                  <SegmentedControl
-                    value={String(settings.captchaTimeoutSeconds)}
-                    onChange={(v) => setField("captchaTimeoutSeconds", Number(v))}
-                    columns={captchaTimeoutOptions.length}
-                    options={captchaTimeoutOptions}
-                  />
-                </div>
-              </>
-            )}
-            <Divider />
-            <Row label={t("miniapp.joinRequestCaptchaTitle")}>
-              <Toggle
-                checked={settings.joinRequestCaptchaEnabled}
-                onChange={(v) => setField("joinRequestCaptchaEnabled", v)}
-              />
-            </Row>
-            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.joinRequestCaptchaHint")}
-            </p>
-            <Divider />
-            <Row label={t("miniapp.antiraidTitle")}>
-              <Toggle checked={settings.antiraidEnabled} onChange={(v) => toggleProFeature("antiraidEnabled", v)} />
-            </Row>
-            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.antiraidHint")}
-            </p>
-            <Divider />
-            <Row
-              label={
-                <span className="flex items-center gap-1.5">
-                  {t("miniapp.federationTitle")}
-                  {!federationEligible && <Badge variant="warning">PRO</Badge>}
-                </span>
-              }
-            >
-              <Toggle
-                checked={settings.federationEnabled}
-                onChange={(v) => toggleProFeature("federationEnabled", v)}
-              />
-            </Row>
-            <ProFeatureHint
-              eligible={federationEligible}
-              enabled={settings.federationEnabled}
-              normalHint={t("miniapp.federationHint")}
-              t={t}
-            />
-            {settings.federationEnabled && (
-              <Link
-                href={`/app/group/${chatId}/broadcast`}
-                className="mt-3 block text-center rounded-[var(--radius-sm)] px-4 py-2.5 text-[14px] font-medium"
-                style={{ background: "#f2f1ee", color: "var(--ink)" }}
-              >
-                {t("miniapp.groupBroadcastLink")}
-              </Link>
-            )}
-
-            <Divider />
-            <p className="text-[13px] font-medium mb-1.5">{t("miniapp.strictContentTitle")}</p>
-            <p className="text-[12px] mb-2" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.strictContentHint")}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {STRICT_CONTENT_RULE_OPTIONS.map(({ value, labelKey }) => {
-                const active = settings.strictContentRules.includes(value);
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() =>
-                      setField(
-                        "strictContentRules",
-                        active
-                          ? settings.strictContentRules.filter((r) => r !== value)
-                          : [...settings.strictContentRules, value]
-                      )
-                    }
-                    className="rounded-full px-3 py-1.5 text-[12px] font-medium border"
-                    style={
-                      active
-                        ? { background: "var(--ink)", color: "var(--bg)", borderColor: "var(--ink)" }
-                        : { borderColor: "var(--border-strong)", color: "var(--ink)" }
-                    }
-                  >
-                    {t(labelKey)}
-                  </button>
-                );
-              })}
-            </div>
-
-            <Divider />
-            <Row label={t("miniapp.adminTaggerTitle")}>
-              <Toggle checked={settings.adminTaggerEnabled} onChange={(v) => setField("adminTaggerEnabled", v)} />
-            </Row>
-            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.adminTaggerHint")}
-            </p>
-
-            <Divider />
-            <Row label={t("miniapp.purgeMessagesOnBanTitle")}>
-              <Toggle
-                checked={settings.purgeMessagesOnBan}
-                onChange={(v) => setField("purgeMessagesOnBan", v)}
-              />
-            </Row>
-            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.purgeMessagesOnBanHint")}
-            </p>
-
-            <Divider />
-            <Row label={t("miniapp.blockNoUsernameTitle")}>
-              <Toggle checked={settings.blockNoUsername} onChange={(v) => setField("blockNoUsername", v)} />
-            </Row>
-            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.blockNoUsernameHint")}
-            </p>
-
-            <Divider />
-            <Row label={t("miniapp.blockNoPhotoTitle")}>
-              <Toggle checked={settings.blockNoPhoto} onChange={(v) => setField("blockNoPhoto", v)} />
-            </Row>
-            <p className="text-[12px] mt-1 mb-3" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.blockNoPhotoHint")}
-            </p>
-
-            <Divider />
-            <p className="text-[13px] font-medium mb-1.5">{t("miniapp.premiumJoinFilterTitle")}</p>
-            <SegmentedControl
-              value={settings.premiumJoinFilter}
-              onChange={(v) => setField("premiumJoinFilter", v)}
-              columns={3}
-              options={[
-                { value: "off", label: t("common.off") },
-                { value: "block_premium", label: t("miniapp.premiumJoinFilterBlockPremium") },
-                { value: "block_non_premium", label: t("miniapp.premiumJoinFilterBlockNonPremium") },
-              ]}
-            />
-
-            <Divider />
-            <p className="text-[13px] font-medium mb-1.5">{t("miniapp.minAccountAgeTitle")}</p>
-            <p className="text-[12px] mb-2" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.minAccountAgeHint")}
-            </p>
-            <SegmentedControl
-              value={String(settings.minAccountAgeDays)}
-              onChange={(v) => setField("minAccountAgeDays", Number(v))}
-              columns={minAccountAgeOptions.length}
-              options={minAccountAgeOptions}
-            />
-
-            <Divider />
-            <Row label={t("miniapp.reactionSpamTitle")}>
-              <Toggle
-                checked={settings.reactionSpamEnabled}
-                onChange={(v) => setField("reactionSpamEnabled", v)}
-              />
-            </Row>
-            <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.reactionSpamHint")}
-            </p>
-
-            <Divider />
-            <Row label={t("miniapp.ocrTitle")}>
-              <Toggle checked={settings.ocrEnabled} onChange={(v) => setField("ocrEnabled", v)} />
-            </Row>
-            <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.ocrHint")}
-            </p>
-
-            <Divider />
-            <Row label={t("miniapp.antiFirstCommentTitle")}>
-              <Toggle
-                checked={settings.antiFirstCommentEnabled}
-                onChange={(v) => setField("antiFirstCommentEnabled", v)}
-              />
-            </Row>
-            <p className="text-[12px] mt-1" style={{ color: "var(--ink-muted)" }}>
-              {t("miniapp.antiFirstCommentHint")}
-            </p>
-          </Collapsible>
-        </CardSection>
-      </Card>
       {supportUrl && (
         <Card>
           <CardSection>
@@ -1025,79 +381,5 @@ export default function GroupSettingsPage() {
         </Card>
       )}
     </div>
-  );
-}
-
-function ProFeatureHint({
-  eligible,
-  enabled,
-  normalHint,
-  t,
-  className = "",
-}: {
-  eligible: boolean;
-  enabled: boolean;
-  normalHint: string;
-  t: (key: string, params?: Record<string, string | number>) => string;
-  className?: string;
-}) {
-  if (eligible) {
-    return (
-      <p className={`text-[12px] mt-1 ${className}`} style={{ color: "var(--ink-muted)" }}>
-        {normalHint}
-      </p>
-    );
-  }
-  // Distinct from the plain "locked" case: this setting is ON in storage but not
-  // currently being enforced (group outgrew the free tier / subscription lapsed) —
-  // silently doing nothing here would be confusing, since the toggle still shows "on".
-  if (enabled) {
-    return (
-      <p className={`text-[12px] mt-1 ${className}`} style={{ color: "#a3401f" }}>
-        {t("miniapp.proNotEnforcedHint", { limit: FREE_TIER_MAX_MEMBERS })}
-      </p>
-    );
-  }
-  return (
-    <p className={`text-[12px] mt-1 ${className}`} style={{ color: "var(--ink-muted)" }}>
-      {t("miniapp.proLockedHint", { limit: FREE_TIER_MAX_MEMBERS })}
-    </p>
-  );
-}
-
-function Row({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
-  return (
-    // gap-3 + min-w-0: the label is free to wrap (several are long enough to
-    // on a 320px screen), and justify-between alone left a wrapped last line
-    // butting straight against the toggle with no gutter.
-    <div className="flex items-center justify-between gap-3 py-1.5">
-      <span className="text-[14px] min-w-0" style={{ color: "var(--ink)" }}>
-        {label}
-      </span>
-      {children}
-    </div>
-  );
-}
-
-function Divider() {
-  return <div className="h-px" style={{ background: "var(--border)" }} />;
-}
-
-/** For a sub-block inside a CardSection that used to be its own titled Card
- * (e.g. "Наказания" now bundles three of these) — mirrors CardSection's own
- * title/subtitle classes exactly, so merging cards doesn't visually demote
- * what reads as a section heading down to a plain muted field label. */
-function SubLabel({ children, subtitle }: { children: React.ReactNode; subtitle?: string }) {
-  return (
-    <>
-      <p className={`text-[13px] font-semibold ${subtitle ? "mb-0.5" : "mb-1.5"}`} style={{ color: "var(--ink)" }}>
-        {children}
-      </p>
-      {subtitle && (
-        <p className="text-[12px] mb-2" style={{ color: "var(--ink-muted)" }}>
-          {subtitle}
-        </p>
-      )}
-    </>
   );
 }

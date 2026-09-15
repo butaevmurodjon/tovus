@@ -35,6 +35,7 @@ export async function GET(req: Request) {
         violationsToday: stats.total,
         joinsToday: activity.joins,
         createdAt: settings.createdAt,
+        dailySummaryOwnerAllowed: settings.dailySummaryOwnerAllowed,
       };
     })
   );
@@ -74,5 +75,9 @@ export async function GET(req: Request) {
       churn30d: eventsExist ? removed30d : null,
     },
     groups: summaries.sort((a, b) => b.createdAt - a.createdAt),
+    // Same no-op-without-this-env-var situation as the group-scoped GET route
+    // (api/miniapp/groups/[groupId]) — the inline toggle on this list needs
+    // to know too, so it can disable+explain instead of looking live.
+    digestHubConfigured: Boolean(process.env.DIGEST_HUB_CHAT_ID),
   });
 }

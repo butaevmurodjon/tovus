@@ -22,11 +22,24 @@ interface GroupStatusFields {
    * i.e. next mount of GroupProvider itself, or an explicit `refresh()`.
    * A snapshot-on-open glance, not a live counter. */
   whitelistCount: number;
+  /** Same snapshot-on-open caveat as whitelistCount — for the settings
+   * index's "Списки и слова" status subtitle (PR-1). */
+  customWordsCount: number;
+  allowlistCount: number;
   violationsToday: number;
   /** `t.me/<bot>?start=support_<chatId>` — "Написать разработчику" deep link,
    * or null when TELEGRAM_BOT_USERNAME isn't provisioned (page must then omit
    * the button, same convention as the other *Url fields elsewhere). */
   supportUrl: string | null;
+  /** Whether OCR_API_KEY is provisioned — `ocrEnabled` is a real no-op
+   * without it (see lib/moderation/ocr.ts), so the settings page disables
+   * the toggle and explains why instead of showing a silently-dead "on". */
+  ocrConfigured: boolean;
+  /** Whether DIGEST_HUB_CHAT_ID is provisioned — the daily-AI-summary cron
+   * skips every group without it (see api/cron/daily-summary), so the
+   * owner-only toggle for this group is disabled + explained rather than
+   * looking live when it can never fire. */
+  digestHubConfigured: boolean;
 }
 
 interface GroupContextValue extends GroupStatusFields {
@@ -50,8 +63,12 @@ const EMPTY_STATUS: GroupStatusFields = {
   memberCount: null,
   federationEligible: true,
   whitelistCount: 0,
+  customWordsCount: 0,
+  allowlistCount: 0,
   violationsToday: 0,
   supportUrl: null,
+  ocrConfigured: true,
+  digestHubConfigured: true,
 };
 
 export function GroupProvider({ chatId, children }: { chatId: number; children: React.ReactNode }) {
@@ -78,8 +95,12 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
           memberCount: data.memberCount ?? null,
           federationEligible: data.federationEligible ?? true,
           whitelistCount: data.whitelistCount ?? 0,
+          customWordsCount: data.customWordsCount ?? 0,
+          allowlistCount: data.allowlistCount ?? 0,
           violationsToday: data.violationsToday ?? 0,
           supportUrl: data.supportUrl ?? null,
+          ocrConfigured: data.ocrConfigured ?? true,
+          digestHubConfigured: data.digestHubConfigured ?? true,
         });
         setStatus("ready");
       })
@@ -129,8 +150,12 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
             memberCount: data.memberCount ?? prev.memberCount,
             federationEligible: data.federationEligible ?? prev.federationEligible,
             whitelistCount: data.whitelistCount ?? prev.whitelistCount,
+            customWordsCount: data.customWordsCount ?? prev.customWordsCount,
+            allowlistCount: data.allowlistCount ?? prev.allowlistCount,
             violationsToday: data.violationsToday ?? prev.violationsToday,
             supportUrl: prev.supportUrl,
+            ocrConfigured: prev.ocrConfigured,
+            digestHubConfigured: prev.digestHubConfigured,
           }));
           return data.settings;
         },

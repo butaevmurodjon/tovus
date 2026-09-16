@@ -7,7 +7,7 @@ import { getAllowlist } from "@/lib/db/allowlist";
 import { isProActive } from "@/lib/billing/plan";
 import { detectProfanity } from "./profanity";
 import { detectSpam, hasAnyLink } from "./spam";
-import { extractQuote } from "./textSignals";
+import { extractQuote, findDangerousFileTag } from "./textSignals";
 import { checkDuplicateFlood, checkUserFlood, consumeNewMemberFlag } from "./flood";
 import { classifyWithDeepseek } from "./deepseek";
 import { detectRestrictedContent, isNewMemberRestricted } from "./newMemberGuard";
@@ -145,6 +145,30 @@ export async function moderateMessage(
   // suppresses individual matched signals, never the whole verdict.
   const contentAllowlist =
     settings.profanityFilter || settings.antispam ? await getAllowlist(chatId).catch(() => []) : [];
+
+  // Real incident (2026-09-15, farpilive_chat): a malware installer relayed
+  // via Quote-reply (external_reply.document — see findDangerousFileTag's
+  // doc comment) rode through with category "profanity" because the
+  // sender's own comment happened to also contain a profanity-dict word.
+  // profanityFilter below returns on its first match, so it never let
+  // detectSpam's dangerous-file check run — the ban/delete still fired
+  // (settings.action doesn't vary by category), but every log/stat/admin
+  // notice said "нецензурная лексика" instead of naming the malware, hiding
+  // exactly the thing an owner most needs to see. Checked unconditionally,
+  // ahead of both toggles below, same as restricted-content/anti-first-
+  // comment above: a quoted installer is dangerous regardless of whether
+  // profanityFilter or antispam happens to be the one enabled.
+  const dangerousFile = findDangerousFileTag(spamCheckMessage);
+  if (dangerousFile) {
+    const where = dangerousFile.fromQuotedMessage ? " в цитируемом сообщении" : "";
+    return {
+      category: "spam",
+      reason: `опасный тип файла${where}: ${dangerousFile.tag}`,
+      forceWarnOnly: false,
+      source: "spam-detector",
+      contentAllowlist,
+    };
+  }
 
   if (settings.profanityFilter && text) {
     const customWords = await getCustomWords(chatId);

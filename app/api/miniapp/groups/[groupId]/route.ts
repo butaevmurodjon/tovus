@@ -189,10 +189,42 @@ export async function PATCH(
   }
 
   const updated = await updateGroupSettings(chatId, effectivePatch);
+
+  // ROADMAP.md §6.1: recompute missingPermissions only when the patch
+  // actually touches a field missingPermissionsFor() cares about (see its
+  // PermissionContext) — the uncached getBotPermissions round trip isn't
+  // worth paying on every unrelated toggle, but skipping it entirely left a
+  // just-enabled captcha/antiraid/federation showing no permission warning
+  // until the next full page load. GroupProvider already falls back to the
+  // previous value when this is omitted, so leaving it out here for an
+  // unrelated patch is still correct, just stale-by-design.
+  const permissionRelevantKeys = ["action", "captchaEnabled", "antiraidEnabled", "antiraidAuto", "federationEnabled"] as const;
+  const touchesPermissions = permissionRelevantKeys.some((key) => key in effectivePatch);
+  const finalSettings = updated ?? settings;
+  // getBotPermissions rethrows anything that isn't a GrammyError (a raw
+  // network failure, say) — the settings write above has already committed
+  // by this point, so a throw here must never fail the whole request and
+  // make the client think the toggle didn't save. .catch(null) degrades to
+  // the same "omitted" shape as touchesPermissions === false, which
+  // GroupProvider already treats as "keep the previous value".
+  const perms = touchesPermissions ? await getBotPermissions(getApi(), chatId).catch(() => null) : null;
+  const missingPermissions = perms
+    ? missingPermissionsFor(
+        {
+          action: finalSettings.action,
+          captchaEnabled: finalSettings.captchaEnabled,
+          antiraidEnabled: finalSettings.antiraidEnabled || finalSettings.antiraidAuto,
+          federationEnabled: finalSettings.federationEnabled,
+        },
+        perms
+      )
+    : undefined;
+
   return NextResponse.json({
     settings: updated,
     rejected,
     memberCount,
-    federationEligible: canUseProFeature(updated ?? settings, memberCount),
+    federationEligible: canUseProFeature(finalSettings, memberCount),
+    ...(missingPermissions !== undefined ? { missingPermissions } : {}),
   });
 }

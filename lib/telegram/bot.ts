@@ -884,6 +884,39 @@ export function getBot(): Bot {
       return;
     }
 
+    // ROADMAP.md §6.6 priority 1: Rose-parity cleanup of Telegram's other
+    // service messages ("X pinned a message", "changed the photo", video
+    // chat events, …). Reuses the SAME deleteServiceMessages toggle as
+    // join/left above rather than a new setting — the roadmap explicitly
+    // calls for "один тумблер «чистить все служебные»", not one per type.
+    // Deliberately excludes boost_added/giveaway_created/giveaway_completed:
+    // unlike join/leave/pin noise, those are content an owner may want
+    // visible, so silently deleting them under the existing default-true
+    // toggle would be a real behaviour change for every group that never
+    // touched this setting — see the doc comment on deleteServiceMessages.
+    // successful_payment is also NOT listed here even though the type allows
+    // it: it's already fully consumed by the dedicated
+    // bot.on("message:successful_payment") handler above, which never calls
+    // next() — an update carrying it can't reach this handler at all.
+    if (
+      message.pinned_message !== undefined ||
+      message.new_chat_photo !== undefined ||
+      message.delete_chat_photo !== undefined ||
+      message.new_chat_title !== undefined ||
+      message.message_auto_delete_timer_changed !== undefined ||
+      message.video_chat_scheduled !== undefined ||
+      message.video_chat_started !== undefined ||
+      message.video_chat_ended !== undefined ||
+      message.video_chat_participants_invited !== undefined ||
+      message.proximity_alert_triggered !== undefined ||
+      message.write_access_allowed !== undefined
+    ) {
+      if (settings?.deleteServiceMessages ?? true) {
+        await ctx.api.deleteMessage(chat.id, message.message_id).catch(() => {});
+      }
+      return;
+    }
+
     const from = message.from;
     if (!from || from.is_bot) return;
     if (!settings) return;

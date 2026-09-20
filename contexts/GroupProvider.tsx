@@ -141,9 +141,12 @@ export function GroupProvider({ chatId, children }: { chatId: number; children: 
             { settings: GroupSettings; rejected?: string[] } & Partial<GroupStatusFields>
           >(`/api/miniapp/groups/${chatId}`, { method: "PATCH", body: JSON.stringify(patch) });
           rejected = data.rejected ?? [];
-          // PATCH returns memberCount + federationEligible but not
-          // missingPermissions (that needs uncached getBotPermissions calls not
-          // worth paying per toggle) — keep the prior value for any field the
+          // PATCH always returns memberCount + federationEligible. It returns
+          // missingPermissions only when the patch actually touched a field
+          // that affects it (action/captchaEnabled/antiraidEnabled/
+          // antiraidAuto/federationEnabled — see the route) — an uncached
+          // getBotPermissions call isn't worth paying for every unrelated
+          // toggle. Either way, keep the prior value for any field the
           // response omits instead of wiping it until the next full refresh.
           setStatusFields((prev) => ({
             missingPermissions: data.missingPermissions ?? prev.missingPermissions,

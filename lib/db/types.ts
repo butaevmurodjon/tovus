@@ -89,8 +89,16 @@ export interface GroupSettings {
   welcomeEnabled: boolean;
   /** May contain the literal placeholder "{user}", substituted with an HTML mention on send. */
   welcomeMessage: string | null;
-  /** Deletes Telegram's own "X joined/added/left the group" service messages.
-   * On by default — purely cosmetic chat cleanup, no moderation tradeoff. */
+  /** Deletes Telegram's own service messages — joins/leaves, pinned-message
+   * notices, chat photo/title changes, video chat events, proximity alerts,
+   * write-access-allowed (ROADMAP.md §6.6 priority 1 — Rose-parity, one
+   * toggle for all types, not one per type). Deliberately does NOT cover
+   * boosts/giveaways — those are content an owner may want visible, unlike
+   * pure chat noise, so they're never auto-deleted regardless of this flag.
+   * On by default — purely cosmetic chat cleanup, no moderation tradeoff.
+   * Side effect: a caught service message returns before `incrementActivity`,
+   * so it never counts toward the "messages" stat/digest — intentional,
+   * service messages aren't chat activity. */
   deleteServiceMessages: boolean;
   /** Off by default: when the action is a silent "delete", also post one short
    * public notice ("сообщение удалено — не размещайте рекламу", with the

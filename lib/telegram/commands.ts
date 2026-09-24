@@ -32,6 +32,7 @@ import { corpusEnabled } from "@/lib/db/corpus";
 import { detectLang, isLang, t, type Lang } from "@/lib/i18n";
 import type { ViolationAction } from "@/lib/db/types";
 import { formatPermissionWarning, getBotPermissions, isBotAdminOfChat, isChatAdmin } from "./adminCheck";
+import { isLocked, lockChat, unlockChat } from "./lockdown";
 import { sendUpgradeInvoice } from "./payments";
 import { normalizeWelcomeMessage } from "./welcome";
 import { normalizeRulesText, parseMessageCaptchaPayload, startMessageCaptchaDm, verifyMessageCaptcha } from "./captcha";
@@ -620,6 +621,33 @@ export function registerCommands(bot: Bot): void {
     if (arg !== "mute" && arg !== "kick" && arg !== "ban") return ctx.reply(t(lang, "bot.warnActionUsage"));
     await updateGroupSettings(ctx.chat!.id, { warnAction: arg });
     await ctx.reply(t(lang, "bot.warnActionSet", { action: t(lang, `bot.actionNames.${arg}`) }));
+  });
+
+  // Chat-wide "read-only mode" (Combot's channel-mode) — the immediate
+  // "someone's raiding right now" action, distinct from any per-user
+  // punishment above: restricts EVERY non-admin from posting via
+  // setChatPermissions. See lib/telegram/lockdown.ts for why the chat's
+  // prior permissions are saved and replayed, not hardcoded, on /unlock.
+  bot.command("lock", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    const perms = await getBotPermissions(ctx.api, ctx.chat!.id);
+    if (!perms.canRestrictMembers) {
+      return ctx.reply(t(lang, "bot.permMissingRestrict", { action: t(lang, "bot.lockAction") }));
+    }
+    if (await isLocked(ctx.chat!.id)) return ctx.reply(t(lang, "bot.lockAlready"));
+    await lockChat(ctx.api, ctx.chat!.id, ctx.from!.id);
+    await ctx.reply(t(lang, "bot.lockedChat"));
+  });
+
+  bot.command("unlock", async (ctx) => {
+    const lang = await langFor(ctx);
+    if (!(await requireGroupChat(ctx, lang))) return;
+    if (!(await requireAdmin(ctx, lang))) return;
+    if (!(await isLocked(ctx.chat!.id))) return ctx.reply(t(lang, "bot.unlockNotLocked"));
+    await unlockChat(ctx.api, ctx.chat!.id);
+    await ctx.reply(t(lang, "bot.unlockedChat"));
   });
 
   bot.command("lang", async (ctx) => {

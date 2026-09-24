@@ -585,7 +585,7 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireGroupChat(ctx, lang))) return;
     if (!(await requireAdmin(ctx, lang))) return;
     const arg = ctx.match?.toString().trim().toLowerCase() as ViolationAction;
-    if (!["delete", "warn", "mute", "ban"].includes(arg)) return ctx.reply(t(lang, "bot.actionSetUsage"));
+    if (!["delete", "warn", "mute", "kick", "ban"].includes(arg)) return ctx.reply(t(lang, "bot.actionSetUsage"));
     await updateGroupSettings(ctx.chat!.id, { action: arg });
     await ctx.reply(t(lang, "bot.actionSet", { action: t(lang, `bot.actionNames.${arg}`) }));
   });
@@ -617,7 +617,7 @@ export function registerCommands(bot: Bot): void {
     if (!(await requireGroupChat(ctx, lang))) return;
     if (!(await requireAdmin(ctx, lang))) return;
     const arg = ctx.match?.toString().trim().toLowerCase();
-    if (arg !== "mute" && arg !== "ban") return ctx.reply(t(lang, "bot.warnActionUsage"));
+    if (arg !== "mute" && arg !== "kick" && arg !== "ban") return ctx.reply(t(lang, "bot.warnActionUsage"));
     await updateGroupSettings(ctx.chat!.id, { warnAction: arg });
     await ctx.reply(t(lang, "bot.warnActionSet", { action: t(lang, `bot.actionNames.${arg}`) }));
   });

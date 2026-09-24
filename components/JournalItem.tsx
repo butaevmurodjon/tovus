@@ -15,6 +15,7 @@ const ACTION_VARIANT: Record<JournalEntry["action"], BadgeVariant> = {
   delete: "neutral",
   warn: "warning",
   mute: "serious",
+  kick: "serious",
   ban: "critical",
 };
 

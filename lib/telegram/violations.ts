@@ -38,7 +38,7 @@ function reactionSuffix(lang: Lang, reactionMs: number | null): string {
   return " " + t(lang, "bot.reactionSuffix", { seconds: (reactionMs / 1000).toFixed(1) });
 }
 
-const MUTE_DURATION_SECONDS = 60 * 60; // 1h
+export const MUTE_DURATION_SECONDS = 60 * 60; // 1h
 
 function randomId(): string {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -281,6 +281,21 @@ async function notifyChat(
       }
     );
     await startVoteBan(chatId, user.id, sent.message_id).catch(() => {});
+    return;
+  }
+
+  if (action === "kick") {
+    // ban+unban, same pattern as blockUnauthorizedBots/the join-time filters
+    // — removed from the group, but free to rejoin (no vote-ban button: an
+    // account that's already left has nothing left to un-restrict, unlike
+    // mute/ban). The rung between mute and a permanent ban.
+    await api.banChatMember(chatId, user.id).catch(() => {});
+    await api.unbanChatMember(chatId, user.id, { only_if_banned: true }).catch(() => {});
+    await api.sendMessage(
+      chatId,
+      t(lang, "bot.kickedUser", { user: mention, reason: verdict.reason }) + escalationSuffix + reaction,
+      { parse_mode: "HTML", reply_markup: attributionRow ? { inline_keyboard: [attributionRow] } : undefined }
+    );
     return;
   }
 

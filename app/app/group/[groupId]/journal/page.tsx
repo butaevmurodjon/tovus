@@ -100,6 +100,13 @@ function JournalTab({
     }
   }
 
+  // Labels/confirm/toast here ("Забанить везде" / "во всех группах бота" /
+  // "забанен во всех группах" — see ru.json's ownerBanUser/ownerBanConfirm/
+  // ownerBannedFromGroup) always promised a bot-wide ban, but this used to
+  // POST the single-chat owner ban route, so it only ever banned in the
+  // group the journal happened to be open on while telling the owner it was
+  // everywhere. Route it through the actual global-ban endpoint (same one
+  // app/app/owner/actions/page.tsx uses) so the button does what it says.
   async function ban(entry: JournalEntry) {
     const confirmed = await confirmAction(t("miniapp.ownerBanConfirm", { id: entry.userId }));
     if (!confirmed) return;
@@ -107,9 +114,9 @@ function JournalTab({
     haptic("medium");
     setBanningId(entry.id);
     try {
-      await fetcher(`/api/miniapp/owner/groups/${chatId}/ban`, {
+      await fetcher(`/api/miniapp/owner/globalban`, {
         method: "POST",
-        body: JSON.stringify({ userId: entry.userId }),
+        body: JSON.stringify({ userId: entry.userId, reason: `Журнал · ${entry.reason}`.slice(0, 300) }),
       });
       hapticNotify("success");
       flash(t("miniapp.ownerBannedFromGroup"));
@@ -154,6 +161,7 @@ function JournalTab({
       delete: t("miniapp.actionDelete"),
       warn: t("miniapp.actionWarn"),
       mute: t("miniapp.actionMute"),
+      kick: t("miniapp.actionKick"),
       ban: t("miniapp.actionBan"),
     },
     restore: t("miniapp.restore"),

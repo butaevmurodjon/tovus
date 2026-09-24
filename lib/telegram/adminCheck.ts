@@ -94,7 +94,12 @@ export function missingPermissionsFor(ctx: PermissionContext, perms: BotPermissi
   // Every action deletes the offending message first.
   if (!perms.canDeleteMessages) missing.push("delete");
   const needsRestrict =
-    ctx.action === "mute" || ctx.action === "ban" || ctx.captchaEnabled || ctx.antiraidEnabled || ctx.federationEnabled;
+    ctx.action === "mute" ||
+    ctx.action === "kick" ||
+    ctx.action === "ban" ||
+    ctx.captchaEnabled ||
+    ctx.antiraidEnabled ||
+    ctx.federationEnabled;
   if (needsRestrict && !perms.canRestrictMembers) missing.push("restrict");
   return missing;
 }
@@ -102,7 +107,7 @@ export function missingPermissionsFor(ctx: PermissionContext, perms: BotPermissi
 /** Every reason restrict rights are actually needed here — the action alone may not be why. */
 function restrictReasons(lang: Lang, ctx: PermissionContext): string[] {
   const reasons: string[] = [];
-  if (ctx.action === "mute" || ctx.action === "ban") reasons.push(t(lang, `bot.actionNames.${ctx.action}`));
+  if (ctx.action === "mute" || ctx.action === "kick" || ctx.action === "ban") reasons.push(t(lang, `bot.actionNames.${ctx.action}`));
   if (ctx.captchaEnabled) reasons.push(t(lang, "miniapp.captchaTitle"));
   if (ctx.antiraidEnabled) reasons.push(t(lang, "miniapp.antiraidTitle"));
   if (ctx.federationEnabled) reasons.push(t(lang, "miniapp.federationTitle"));

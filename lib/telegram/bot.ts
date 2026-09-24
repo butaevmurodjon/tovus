@@ -1,5 +1,6 @@
 import { Bot, webhookCallback } from "grammy";
 import type { Api } from "grammy";
+import { autoRetry } from "@grammyjs/auto-retry";
 import { after } from "next/server";
 import type { Message, User } from "grammy/types";
 import type { CaptchaType } from "@/lib/db/types";
@@ -25,6 +26,7 @@ import { clearGroupAdmins, identityOf, setUserAdminStatus, syncGroupAdmins } fro
 import { incrementActivity, incrementHourlyActivity, incrementReasonTag, incrementStat } from "@/lib/db/stats";
 import { getCachedMemberCount } from "@/lib/db/memberCount";
 import { isGloballyBanned } from "@/lib/db/globalBan";
+import { matchesUsernameStemBan } from "@/lib/db/usernameStemBans";
 import { getCachedMessage, getLastMessageId, getRecentMessageIds, recordMessage } from "@/lib/db/messageAuthors";
 import { formatPlanDate } from "@/lib/billing/plan";
 import { moderateMessage } from "@/lib/moderation";
@@ -135,6 +137,18 @@ export function getBot(): Bot {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set");
   const bot = new Bot(token);
+  // Transparently retries any API call grammY would otherwise reject outright
+  // on a 429 (flood control) or 5xx (retried by default) — without this,
+  // every such call across this file (moderation actions, captcha, welcome
+  // messages, ...) is a silent, permanent loss under load since almost all of
+  // them are wrapped in .catch(() => {}). maxDelaySeconds caps how long a
+  // SINGLE call will wait before giving up, not total handler time — this
+  // handler makes several sequential ctx.api calls, so keep it short (3s)
+  // rather than the library's own patient default, or a flood-control event
+  // can still blow past the webhook's 25s response budget (see
+  // getWebhookHandler below; onTimeout:"return" answers Telegram either way,
+  // but Vercel can still kill the handler mid-flight once it does).
+  bot.api.config.use(autoRetry({ maxRetryAttempts: 3, maxDelaySeconds: 3 }));
 
   registerCommands(bot);
 
@@ -347,6 +361,20 @@ export function getBot(): Bot {
     if (!settings) return;
 
     if (await isGloballyBanned(user.id)) {
+      await ctx.declineChatJoinRequest(user.id).catch(() => {});
+      await Promise.all([
+        incrementStat(chat.id, "spam").catch(() => {}),
+        incrementReasonTag(chat.id, "globalban").catch(() => {}),
+      ]);
+      return;
+    }
+
+    // Owner-authored username-prefix rule (see lib/db/usernameStemBans.ts) —
+    // catches the *next* account of a rotating-suffix spam-bot family before
+    // it ever joins. Filed under the same "globalban" reason tag as the
+    // userId-keyed ban above: both are owner-authored blacklist hits, not
+    // worth a separate stats bucket.
+    if (await matchesUsernameStemBan(user.username)) {
       await ctx.declineChatJoinRequest(user.id).catch(() => {});
       await Promise.all([
         incrementStat(chat.id, "spam").catch(() => {}),
@@ -704,6 +732,20 @@ export function getBot(): Bot {
             // outranks every per-group toggle. Not gated by any setting — it's
             // never opt-out for a group the bot manages.
             if (await isGloballyBanned(member.id)) {
+              const banned = await ctx.api.banChatMember(chat.id, member.id).catch(() => false);
+              if (banned) {
+                await Promise.all([
+                  incrementStat(chat.id, "spam").catch(() => {}),
+                  incrementReasonTag(chat.id, "globalban").catch(() => {}),
+                ]);
+              }
+              return;
+            }
+
+            // Same owner-authored username-prefix rule as chat_join_request
+            // above, for groups that add members directly instead of through
+            // a join request.
+            if (await matchesUsernameStemBan(member.username)) {
               const banned = await ctx.api.banChatMember(chat.id, member.id).catch(() => false);
               if (banned) {
                 await Promise.all([

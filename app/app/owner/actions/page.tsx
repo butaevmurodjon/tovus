@@ -9,7 +9,7 @@ import { confirmAction, haptic, hapticNotify } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
 import { ownerActionErrorText } from "@/lib/miniapp/ownerActionErrorText";
 import type { AiRule, AiRuleLabel } from "@/lib/db/aiRules";
-import type { GlobalBanEntry } from "@/lib/db/types";
+import type { GlobalBanEntry, UsernameStemBanEntry } from "@/lib/db/types";
 
 type ResolveResult =
   | { type: "message"; chatId: number; messageId: number; authorUserId: number | null; text: string | null }
@@ -66,7 +66,7 @@ export default function OwnerActionsPage() {
   const [resolving, setResolving] = useState(false);
   const [resolved, setResolved] = useState<ResolveResult | null>(null);
   const [acting, setActing] = useState<
-    "delete" | "ban-group" | "ban-everywhere" | "ban-and-delete" | "unban-group" | null
+    "delete" | "ban-group" | "ban-everywhere" | "ban-and-delete" | "unban-group" | "mute-group" | "mute-and-delete" | null
   >(null);
 
   async function resolve() {
@@ -146,6 +146,48 @@ export default function OwnerActionsPage() {
           : deleteFailed
             ? "Пользователь забанен, но сообщение удалить не удалось (уже удалено или нет прав)."
             : "Пользователь забанен в группе, сообщение удалено."
+      );
+    } catch (error) {
+      hapticNotify("error");
+      flash(ownerActionErrorText(error));
+    } finally {
+      setActing(null);
+    }
+  }
+
+  // Mirrors banResolvedAuthorInGroup — mute is the "weaker" counterpart the
+  // owner asked for alongside ban, same group-scoped shape (a mute needs a
+  // chat to restrict in, so there's no "mute everywhere" — see mute/route.ts).
+  async function muteResolvedAuthorInGroup(alsoDelete: boolean) {
+    if (!resolved || resolved.type !== "message" || !resolved.authorUserId) return;
+    const userId = resolved.authorUserId;
+    const question = alsoDelete
+      ? `Замьютить пользователя ${userId} в этой группе на 1 час и удалить сообщение?`
+      : `Замьютить пользователя ${userId} в этой группе на 1 час?`;
+    if (!(await confirmAction(question))) return;
+    haptic("medium");
+    setActing(alsoDelete ? "mute-and-delete" : "mute-group");
+    try {
+      await fetcher(`/api/miniapp/owner/groups/${resolved.chatId}/mute`, {
+        method: "POST",
+        body: JSON.stringify({ userId }),
+      });
+      let deleteFailed = false;
+      if (alsoDelete) {
+        await fetcher(`/api/miniapp/owner/groups/${resolved.chatId}/delete`, {
+          method: "POST",
+          body: JSON.stringify({ messageId: resolved.messageId }),
+        }).catch(() => {
+          deleteFailed = true;
+        });
+      }
+      hapticNotify(deleteFailed ? "warning" : "success");
+      flash(
+        !alsoDelete
+          ? "Пользователь замьючен в группе на 1 час."
+          : deleteFailed
+            ? "Пользователь замьючен, но сообщение удалить не удалось (уже удалено или нет прав)."
+            : "Пользователь замьючен на 1 час, сообщение удалено."
       );
     } catch (error) {
       hapticNotify("error");
@@ -262,6 +304,72 @@ export default function OwnerActionsPage() {
       flash("Не удалось выполнить действие. Попробуйте ещё раз.");
     } finally {
       setUnbanningId(null);
+    }
+  }
+
+  // --- Section: username-stem bans --------------------------------------
+  // For spam-bot families that rotate only the tail of an otherwise-fixed
+  // username per fresh account (the owner's own example: @mariya_sharapova_9r8l,
+  // next one @mariya_sharapova_x3q1 …) — there's no userId to ban yet, so the
+  // rule is a username prefix, checked at join time (lib/telegram/bot.ts).
+  const [stemBans, setStemBans] = useState<UsernameStemBanEntry[] | null>(null);
+  const [stemBansError, setStemBansError] = useState(false);
+  const [stemInput, setStemInput] = useState("");
+  const [stemReason, setStemReason] = useState("");
+  const [addingStem, setAddingStem] = useState(false);
+  const [removingStem, setRemovingStem] = useState<string | null>(null);
+
+  function loadStemBans() {
+    fetcher<{ bans: UsernameStemBanEntry[] }>("/api/miniapp/owner/usernamebans")
+      .then((d) => setStemBans(d.bans))
+      .catch(() => setStemBansError(true));
+  }
+
+  useEffect(() => {
+    loadStemBans();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function addStemBan() {
+    const stem = stemInput.trim().replace(/^@/, "");
+    if (stem.length < 4) {
+      flash("Общая часть слишком короткая (минимум 4 символа) — иначе поймает случайных людей.");
+      return;
+    }
+    if (!(await confirmAction(`Банить всех новых с юзернеймом на "${stem}…"?`))) return;
+    haptic("medium");
+    setAddingStem(true);
+    try {
+      await fetcher("/api/miniapp/owner/usernamebans", {
+        method: "POST",
+        body: JSON.stringify({ stem, reason: stemReason.trim() }),
+      });
+      setStemInput("");
+      setStemReason("");
+      hapticNotify("success");
+      flash("Правило добавлено.");
+      loadStemBans();
+    } catch {
+      hapticNotify("error");
+      flash("Не удалось сохранить правило.");
+    } finally {
+      setAddingStem(false);
+    }
+  }
+
+  async function removeStemBan(entry: UsernameStemBanEntry) {
+    if (!(await confirmAction(`Снять правило "${entry.stem}…"?`))) return;
+    haptic("light");
+    setRemovingStem(entry.stem);
+    try {
+      await fetcher(`/api/miniapp/owner/usernamebans?stem=${encodeURIComponent(entry.stem)}`, { method: "DELETE" });
+      setStemBans((cur) => cur?.filter((b) => b.stem !== entry.stem) ?? cur);
+      hapticNotify("success");
+    } catch {
+      hapticNotify("error");
+      flash("Не удалось выполнить действие. Попробуйте ещё раз.");
+    } finally {
+      setRemovingStem(null);
     }
   }
 
@@ -393,6 +501,12 @@ export default function OwnerActionsPage() {
                     <Button variant="secondary" onClick={unbanResolvedAuthorInGroup} disabled={acting !== null}>
                       {acting === "unban-group" ? "Снимаем…" : "Разбанить в этой группе"}
                     </Button>
+                    <Button variant="secondary" onClick={() => muteResolvedAuthorInGroup(false)} disabled={acting !== null}>
+                      {acting === "mute-group" ? "Мьютим…" : "Замьютить автора (1ч)"}
+                    </Button>
+                    <Button variant="secondary" onClick={() => muteResolvedAuthorInGroup(true)} disabled={acting !== null}>
+                      {acting === "mute-and-delete" ? "Выполняем…" : "Замьютить и удалить"}
+                    </Button>
                   </>
                 )}
               </div>
@@ -419,6 +533,17 @@ export default function OwnerActionsPage() {
               <Button variant="danger" onClick={banResolvedUserEverywhere} disabled={acting !== null}>
                 {acting === "ban-everywhere" ? "Баним…" : "Забанить везде"}
               </Button>
+              {resolved.username && (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setStemInput(resolved.username ?? "");
+                    flash("Обрежьте случайное окончание в поле ниже и сохраните как правило ↓");
+                  }}
+                >
+                  Это бот-семейство (меняется только окончание) ↓
+                </Button>
+              )}
             </div>
           )}
         </CardSection>
@@ -483,6 +608,67 @@ export default function OwnerActionsPage() {
                 </div>
                 <Button variant="secondary" onClick={() => unban(entry)} disabled={unbanningId === entry.userId}>
                   Разбанить
+                </Button>
+              </div>
+            ))}
+          </div>
+        </CardSection>
+      </Card>
+
+      <Card>
+        <CardSection
+          title="Бан по началу юзернейма"
+          subtitle='Для ботов-серий, где меняется только "хвост" юзернейма (например @mariya_sharapova_9r8l → следующий @mariya_sharapova_x3q1) — банит любой будущий аккаунт с таким началом при входе в любую группу'
+        >
+          <div className="flex flex-col gap-2 mb-3">
+            <input
+              value={stemInput}
+              onChange={(e) => setStemInput(e.target.value)}
+              placeholder="Например: mariya_sharapova_"
+              className="rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+              style={{ borderColor: "var(--border-strong)" }}
+            />
+            <input
+              value={stemReason}
+              onChange={(e) => setStemReason(e.target.value)}
+              placeholder="Причина (необязательно)"
+              className="rounded-[var(--radius-sm)] px-3 py-2 text-[13px] border"
+              style={{ borderColor: "var(--border-strong)" }}
+            />
+            <Button variant="danger" onClick={addStemBan} disabled={addingStem || stemInput.trim().length < 4}>
+              {addingStem ? "Сохраняем…" : "Добавить правило"}
+            </Button>
+          </div>
+
+          {stemBansError && <p className="text-[12px]" style={{ color: "var(--ink-muted)" }}>Не удалось загрузить список.</p>}
+          {stemBans === null && !stemBansError && <p className="text-[12px]" style={{ color: "var(--ink-muted)" }}>Загрузка…</p>}
+          {stemBans?.length === 0 && (
+            <p className="text-[13px] text-center py-6" style={{ color: "var(--ink-muted)" }}>
+              Список пуст.
+            </p>
+          )}
+          <div className="flex flex-col gap-2">
+            {stemBans?.map((entry) => (
+              <div
+                key={entry.stem}
+                className="flex items-start justify-between gap-2 rounded-[var(--radius-sm)] border p-2.5"
+                style={{ borderColor: "var(--border)" }}
+              >
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium break-words" style={{ color: "var(--ink)" }}>
+                    @{entry.stem}…
+                  </p>
+                  {entry.reason && entry.reason !== "—" && (
+                    <p className="text-[12px] mt-0.5 break-words" style={{ color: "var(--ink-secondary)" }}>
+                      {entry.reason}
+                    </p>
+                  )}
+                  <p className="text-[11px] mt-1" style={{ color: "var(--ink-muted)" }}>
+                    {formatDate(entry.bannedAt, lang)}
+                  </p>
+                </div>
+                <Button variant="secondary" onClick={() => removeStemBan(entry)} disabled={removingStem === entry.stem}>
+                  Удалить
                 </Button>
               </div>
             ))}

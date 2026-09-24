@@ -40,11 +40,12 @@ export default function PunishmentsSettingsPage() {
           <SegmentedControl
             value={settings.action}
             onChange={(action) => setField("action", action)}
-            columns={2}
+            columns={3}
             options={[
               { value: "delete", label: t("miniapp.actionDelete") },
               { value: "warn", label: t("miniapp.actionWarn") },
               { value: "mute", label: t("miniapp.actionMute") },
+              { value: "kick", label: t("miniapp.actionKick") },
               { value: "ban", label: t("miniapp.actionBan") },
             ]}
           />
@@ -80,9 +81,10 @@ export default function PunishmentsSettingsPage() {
                   <SegmentedControl
                     value={settings.warnAction}
                     onChange={(action) => setField("warnAction", action)}
-                    columns={2}
+                    columns={3}
                     options={[
                       { value: "mute", label: t("miniapp.actionMute") },
+                      { value: "kick", label: t("miniapp.actionKick") },
                       { value: "ban", label: t("miniapp.actionBan") },
                     ]}
                   />

@@ -1,6 +1,12 @@
 import type { Lang } from "@/lib/i18n";
 
-export type ViolationAction = "delete" | "warn" | "mute" | "ban";
+// "kick" — ban+unban, same as blockUnauthorizedBots/blockNoUsername already
+// do for a rejected joiner: removed from the group but free to rejoin
+// (nothing in violationsToBan.ts's global-ban or CAS lists), unlike "ban".
+// The lighter punishment-ladder rung the owner asked for, between mute and
+// a permanent ban — same option most top anti-spam bots (Combot, @LolsBot)
+// offer as their default "removal" action.
+export type ViolationAction = "delete" | "warn" | "mute" | "kick" | "ban";
 
 export type ViolationCategory = "profanity" | "spam" | "premium";
 
@@ -79,7 +85,7 @@ export interface GroupSettings {
   warnEscalationEnabled: boolean;
   /** Warns within `warnTtlDays` before escalating to `warnAction`. */
   warnLimit: number;
-  warnAction: "mute" | "ban";
+  warnAction: "mute" | "kick" | "ban";
   warnTtlDays: number;
   /** §15.4: unique chat-member clicks needed on the "vote to lift" button
    * under a mute/ban notice before it's auto-reversed. Never offered for
@@ -307,7 +313,11 @@ export const DEFAULT_GROUP_SETTINGS: Omit<GroupSettings, "chatId" | "title" | "c
   promoChannelOptIn: false,
   blockUnauthorizedBots: true,
   strictContentRules: [],
-  purgeMessagesOnBan: false,
+  // 2026-09-24: flipped default to on — the owner wants *any* ban (manual,
+  // automatic, or global) to also clean up the banned account's other recent
+  // messages, not just the one that triggered it. Still a per-group toggle
+  // (an admin can turn it back off), just no longer opt-in.
+  purgeMessagesOnBan: true,
   adminTaggerEnabled: false,
   blockNoUsername: false,
   blockNoPhoto: false,
@@ -439,6 +449,21 @@ export interface AdminGroupSummary {
  * not just one — see lib/telegram/globalBan.ts. */
 export interface GlobalBanEntry {
   userId: number;
+  reason: string;
+  bannedAt: number;
+  bannedBy: number;
+}
+
+/** A bot-owner-issued rule blocking every *future* account whose username
+ * starts with a given prefix ("stem") — for spam-bot families that rotate
+ * only the tail of an otherwise-fixed username per fresh account (e.g.
+ * `mariya_sharapova_9r8l`, next one `mariya_sharapova_x3q1`, …). Unlike
+ * `GlobalBanEntry`, this has no userId to key on — the whole point is that
+ * the account doesn't exist yet at the time the owner adds the rule — so it's
+ * matched by username prefix at join time instead. See
+ * lib/db/usernameStemBans.ts. */
+export interface UsernameStemBanEntry {
+  stem: string;
   reason: string;
   bannedAt: number;
   bannedBy: number;

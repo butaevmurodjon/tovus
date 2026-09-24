@@ -186,9 +186,13 @@ export default function GroupSettingsPage() {
     `${t("miniapp.statusWordAntiraid")} ${antiraidEffective ? t("common.on") : t("common.off")}`,
   ].join(" · ");
 
-  const actionLabelKey = { delete: "actionDelete", warn: "actionWarn", mute: "actionMute", ban: "actionBan" }[
-    settings.action
-  ];
+  const actionLabelKey = {
+    delete: "actionDelete",
+    warn: "actionWarn",
+    mute: "actionMute",
+    kick: "actionKick",
+    ban: "actionBan",
+  }[settings.action];
   const punishmentsStatus = [
     t(`miniapp.${actionLabelKey}`),
     settings.warnEscalationEnabled && t("miniapp.statusWarnLimit", { limit: settings.warnLimit }),

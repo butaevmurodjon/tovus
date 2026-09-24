@@ -14,6 +14,7 @@ import { PermissionWarning } from "@/components/PermissionWarning";
 import { SettingsLink } from "@/components/SettingsLink";
 import { Row, ProFeatureHint } from "@/components/SettingsPrimitives";
 import { JoinRequestsCard } from "./JoinRequestsCard";
+import { LockdownCard } from "./LockdownCard";
 import { useToast, Toast } from "@/lib/miniapp/useToast";
 import { haptic, hapticNotify, openInvoice, openTelegramLink } from "@/lib/miniapp/telegram";
 import { ApiError } from "@/lib/miniapp/api";
@@ -319,6 +320,8 @@ export default function GroupSettingsPage() {
       </div>
 
       <JoinRequestsCard chatId={chatId} />
+
+      <LockdownCard chatId={chatId} />
 
       {/* Федерация: отдельная тема (общий бан-лист МЕЖДУ группами), не про
           эту группу саму по себе — своя карточка, а не строчка в свалке. */}
